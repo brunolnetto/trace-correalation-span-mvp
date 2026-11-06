@@ -135,6 +135,13 @@ def configure_logging(service_name: str) -> None:
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
 
+    # Uvicorn installs dedicated handlers before importing the application.
+    # Route its logs through the same JSON formatter as application logs.
+    for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        server_logger = logging.getLogger(logger_name)
+        server_logger.handlers.clear()
+        server_logger.propagate = True
+
 
 def configure_tracing(service_name: str) -> TracerProvider:
     sampling_ratio = float(os.getenv("OTEL_TRACES_SAMPLER_ARG", "1.0"))
