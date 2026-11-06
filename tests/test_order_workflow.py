@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from uuid import NAMESPACE_URL, uuid5
 
 import httpx
 import pytest
@@ -90,7 +91,7 @@ async def test_order_saga_completes_and_propagates_correlation_id(monkeypatch):
         "550e8400-e29b-41d4-a716-446655440000"
     )
     assert requests[0].url.path == "/inventory/7/reservations"
-    assert requests[0].read() == (
+    assert requests[0].content == (
         b'{"order_id":123,"saga_id":"saga-success","quantity":2}'
     )
 
@@ -133,7 +134,7 @@ async def test_order_confirmation_failure_refunds_then_releases_inventory(
     assert [request.method for request in requests] == ["POST", "DELETE"]
     assert tracker.incomplete_steps == []
 
-    payment_id = workflow.str_uuid5_for_test("saga-confirm-failure")
+    payment_id = str(uuid5(NAMESPACE_URL, "payment:saga-confirm-failure"))
     assert await payment_gateway.status(payment_id) == "refunded"
 
 
