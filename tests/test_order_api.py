@@ -5,9 +5,9 @@ from importlib import import_module
 import httpx
 import pytest
 
-import app.observability as observability
-import app.order.workflow as workflow
+from app import observability
 from app.observability import CorrelationIdMiddleware
+from app.order import workflow
 from app.order.workflow import payment_gateway
 
 # Import the production routes without configuring a real OTLP exporter in

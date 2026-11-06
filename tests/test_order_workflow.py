@@ -6,7 +6,7 @@ from uuid import NAMESPACE_URL, uuid5
 import httpx
 import pytest
 
-import app.order.workflow as workflow
+from app.order import workflow
 from app.order.workflow import (
     PaymentDeclined,
     create_order_processing_saga,
