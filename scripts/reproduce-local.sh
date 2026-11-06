@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Reproduce the complete local observability flow:
-# uv tests/lint -> build/start services -> HTTP smoke test ->
+# Reproduce the Saga + observability flow:
+# uv tests/lint -> build/start services -> success + compensation scenarios ->
 # validate JSON logs and the distributed trace in Jaeger.
 #
 # Usage:
