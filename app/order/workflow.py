@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import os
 from threading import Lock
 from typing import Any
@@ -54,7 +53,7 @@ class PaymentGateway:
         return payment_id
 
     async def refund(self, payment_id: str) -> None:
-        async with self._lock:
+        with self._lock:
             payment = self._payments.get(payment_id)
             if payment is not None and payment["status"] == "charged":
                 payment["status"] = "refunded"
