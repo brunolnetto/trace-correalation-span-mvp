@@ -13,7 +13,13 @@ from app.order.workflow import payment_gateway
 # Import the production routes without configuring a real OTLP exporter in
 # this in-process ASGI test. Docker reproduction verifies the real provider.
 configure_observability = observability.configure_observability
-observability.configure_observability = lambda app, service_name: None
+
+
+def skip_observability_setup(app, service_name):
+    return None
+
+
+observability.configure_observability = skip_observability_setup
 try:
     order_app = import_module("app.order.main").app
 finally:
