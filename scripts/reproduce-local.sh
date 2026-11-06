@@ -13,6 +13,10 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Do not inherit another repository's virtual environment (e.g. SOSE).
+unset VIRTUAL_ENV
+export UV_PROJECT_ENVIRONMENT="$ROOT_DIR/.venv"
+
 CORRELATION_ID="550e8400-e29b-41d4-a716-446655440000"
 ORDER_URL="${ORDER_URL:-http://localhost:8000}"
 INVENTORY_URL="${INVENTORY_URL:-http://localhost:8001}"
@@ -62,20 +66,19 @@ if (( CLEANUP )); then
 fi
 
 echo "==> 1/6: Resolve and install Python dependencies"
-if [[ -f uv.lock ]]; then
-  uv sync --all-groups --locked
-else
-  echo "uv.lock is absent; resolving dependencies and generating it."
-  uv sync --all-groups
-  [[ -f uv.lock ]] || die "uv did not create uv.lock"
-  echo "NOTE: uv.lock was generated locally. Review and commit it for repeatable installs."
+# Keep local, CI, and container runtimes aligned on Python 3.12.
+uv lock --python 3.12
+uv sync --python 3.12 --all-groups --locked
+[[ -f uv.lock ]] || die "uv did not create uv.lock"
+if ! git ls-files --error-unmatch uv.lock >/dev/null 2>&1; then
+  echo "NOTE: uv.lock is generated locally but is not committed. Review and commit it for repeatable installs."
 fi
 
 echo "==> 2/6: Run unit and concurrency tests"
-uv run pytest
+uv run --python 3.12 pytest
 
 echo "==> 3/6: Run Ruff"
-uv run ruff check .
+uv run --python 3.12 ruff check .
 
 echo "==> 4/6: Build and start Jaeger plus both APIs"
 docker compose up --build --detach
