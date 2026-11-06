@@ -173,7 +173,7 @@ if (( ! TRACE_FOUND )); then
 fi
 echo "    Jaeger contains one trace with order-api + inventory-api spans"
 
-docker compose logs --no-color order-api inventory-api > "$TMP_DIR/service.log"
+docker compose logs --no-log-prefix --no-color order-api inventory-api > "$TMP_DIR/service.log"
 python3 - "$TMP_DIR/service.log" "$CORRELATION_ID" <<'PY'
 import json
 import sys
