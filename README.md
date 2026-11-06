@@ -36,7 +36,7 @@ correlation ID.
 
 ## Reproduce locally (recommended)
 
-Requirements: Docker Engine, Docker Compose v2, `uv`, `curl`, and Python 3.12+.
+Requirements: Docker Engine, Docker Compose v2, `uv`, and `curl`. The script provisions and uses the project's pinned Python 3.12 interpreter, independently of the currently activated virtual environment.
 
 Run the end-to-end reproduction from the repository root:
 
