@@ -50,7 +50,7 @@ If `uv.lock` is generated on the first run, review and commit it so subsequent r
 
 ## Run locally with Docker Compose
 
-Requirements: Docker Engine and Docker Compose v2.
+Requirements: Docker Engine and Docker Compose v2. Ensure the project's lockfile exists first (run `uv lock --python 3.12` once from the repository root if needed).
 
 ```bash
 docker compose up --build
