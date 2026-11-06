@@ -59,13 +59,13 @@ class PaymentGateway:
                 payment["status"] = "refunded"
 
     async def status(self, payment_id: str) -> str | None:
-        async with self._lock:
+        with self._lock:
             payment = self._payments.get(payment_id)
             return payment["status"] if payment is not None else None
 
     async def reset(self) -> None:
         """Reset process-local state; intended for deterministic tests."""
-        async with self._lock:
+        with self._lock:
             self._payments.clear()
 
 
