@@ -18,9 +18,9 @@ unset VIRTUAL_ENV
 export UV_PROJECT_ENVIRONMENT="$ROOT_DIR/.venv"
 
 CORRELATION_ID="550e8400-e29b-41d4-a716-446655440000"
-ORDER_URL="${ORDER_URL:-http://localhost:8000}"
-INVENTORY_URL="${INVENTORY_URL:-http://localhost:8001}"
-JAEGER_URL="${JAEGER_URL:-http://localhost:16686}"
+ORDER_URL="${ORDER_URL:-http://127.0.0.1:8000}"
+INVENTORY_URL="${INVENTORY_URL:-http://127.0.0.1:8001}"
+JAEGER_URL="${JAEGER_URL:-http://127.0.0.1:16686}"
 WAIT_SECONDS="${WAIT_SECONDS:-60}"
 CLEANUP=0
 
@@ -88,9 +88,15 @@ wait_for_url() {
   local description="$2"
   local deadline=$((SECONDS + WAIT_SECONDS))
 
-  until curl --silent --show-error --fail "$url" >/dev/null 2>&1; do
+  until curl --ipv4 --connect-timeout 2 --max-time 5 \
+    --silent --show-error --fail "$url" >/dev/null 2>&1; do
     if (( SECONDS >= deadline )); then
+      echo "Last HTTP probe for $description ($url):" >&2
+      curl --ipv4 --verbose --connect-timeout 3 --max-time 5 "$url" \
+        -o /dev/null >&2 || true
+      echo "Docker port mappings:" >&2
       docker compose ps >&2 || true
+      echo "Recent container logs:" >&2
       docker compose logs --tail=100 >&2 || true
       die "Timed out waiting for $description at $url"
     fi
