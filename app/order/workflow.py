@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from threading import Lock
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
@@ -17,7 +18,7 @@ PAYMENT_DECLINE_ABOVE = float(os.getenv("PAYMENT_DECLINE_ABOVE", "1000"))
 class ProcessOrderRequest(BaseModel):
     product_id: int = Field(gt=0)
     quantity: int = Field(default=1, gt=0)
-    amount: float = Field(gt=0)
+    amount: float = Field(gt=0, allow_inf_nan=False)
 
 
 class PaymentDeclined(Exception):
@@ -29,7 +30,7 @@ class PaymentGateway:
 
     def __init__(self) -> None:
         self._payments: dict[str, dict[str, Any]] = {}
-        self._lock = asyncio.Lock()
+        self._lock = Lock()
 
     async def charge(self, ctx: dict[str, Any]) -> str:
         amount = float(ctx["amount"])
@@ -37,7 +38,7 @@ class PaymentGateway:
             raise PaymentDeclined("Payment was declined by the demo gateway")
 
         payment_id = str(uuid5(NAMESPACE_URL, f"payment:{ctx['saga_id']}"))
-        async with self._lock:
+        with self._lock:
             existing = self._payments.get(payment_id)
             if existing is not None:
                 if existing["status"] == "charged":
@@ -71,7 +72,7 @@ class PaymentGateway:
 
 payment_gateway = PaymentGateway()
 _orders: dict[int, dict[str, Any]] = {}
-_order_lock = asyncio.Lock()
+_order_lock = Lock()
 
 
 async def persist_order(ctx: dict[str, Any]) -> dict[str, str]:
@@ -84,7 +85,7 @@ async def persist_order(ctx: dict[str, Any]) -> dict[str, str]:
         "saga_id": ctx["saga_id"],
         "status": "processed",
     }
-    async with _order_lock:
+    with _order_lock:
         _orders[int(ctx["order_id"])] = record
     return {"order_status": "processed"}
 
