@@ -34,6 +34,20 @@ The IDs are deliberately not interchangeable. OpenTelemetry owns trace and
 span creation and W3C context propagation; the application owns the
 correlation ID.
 
+## Reproduce locally (recommended)
+
+Requirements: Docker Engine, Docker Compose v2, `uv`, `curl`, and Python 3.12+.
+
+Run the end-to-end reproduction from the repository root:
+
+```bash
+bash scripts/reproduce-local.sh
+```
+
+The script resolves/synchronizes dependencies, generates `uv.lock` on the first run if it is absent, runs pytest and Ruff, builds and starts Jaeger plus both APIs, waits for readiness, sends a request with a known correlation ID, and verifies the response, correlated JSON logs, and a cross-service trace in Jaeger. It leaves the Compose stack running for inspection; stop it with `docker compose down`. Pass `--cleanup` to stop the stack automatically when the script exits.
+
+If `uv.lock` is generated on the first run, review and commit it so subsequent runs use `uv sync --locked` and reproduce the same dependency resolution.
+
 ## Run locally with Docker Compose
 
 Requirements: Docker Engine and Docker Compose v2.
