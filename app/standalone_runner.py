@@ -89,7 +89,7 @@ class RunnerConfig:
             < self.collector_poll_initial_backoff_seconds
         ):
             raise ValueError(
-                "collector_poll_max_backoff_seconds must be at least the initial backoff"
+                "collector_poll_max_backoff_seconds must be >= initial backoff"
             )
         if not self.report_path:
             raise ValueError("report_path must not be empty")
