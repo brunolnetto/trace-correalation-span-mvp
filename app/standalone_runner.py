@@ -446,6 +446,18 @@ async def run_scenario(
                 first_decision.get("decision"),
             )
             purchase_order = first_decision.get("purchase_order") or {}
+            _assert(
+                report,
+                "purchase order belongs to the demo product",
+                config.product_id,
+                purchase_order.get("product_id"),
+            )
+            _assert(
+                report,
+                "new purchase order starts in created state",
+                "created",
+                purchase_order.get("status"),
+            )
             expected_po_quantity = (
                 config.target_stock - first_checkpoint["available_quantity"]
             )
@@ -544,6 +556,12 @@ async def run_scenario(
                 "open purchase order suppresses duplicate replenishment",
                 "open_purchase_order_exists",
                 in_flight_decision.get("decision"),
+            )
+            _assert(
+                report,
+                "in-flight purchase order quantity is counted on order",
+                expected_po_quantity,
+                in_flight_decision.get("on_order"),
             )
             _assert(
                 report,
@@ -659,6 +677,12 @@ async def run_scenario(
             _assert(
                 report,
                 "post-receipt inventory position is above reorder point",
+                True,
+                final_checkpoint["available_quantity"] > config.reorder_point,
+            )
+            _assert(
+                report,
+                "supplier decision matches final inventory position",
                 final_checkpoint["available_quantity"],
                 final_decision.get("inventory_position"),
             )
