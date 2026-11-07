@@ -336,6 +336,7 @@ def build_generator_events(
             "attributes": {
                 **attempt.to_dict(),
                 "run_id": run_id,
+                "plan_id": config.plan_id,
                 "mode": config.mode,
                 "seed": config.seed,
             },
