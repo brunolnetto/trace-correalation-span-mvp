@@ -340,8 +340,8 @@ async def test_standalone_scenario_fails_with_missing_collector_events_in_report
     barrier = report["collector_barrier"]
     assert report["status"] == "failed"
     assert barrier["status"] == "timeout"
-    assert barrier["expected_count"] == 67
-    assert barrier["expected_count"] == 67
+    assert barrier["observed_count"] == 54
+    assert barrier["expected_count"] == 55
     assert barrier["missing"] == [
         {
             "correlation_id": report["correlation_ids"]["supplier"],
