@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import httpx
 import pytest
 
@@ -251,7 +253,7 @@ async def test_generator_event_publisher_posts_batches_to_collector():
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         payload = request.read()
-        batch_size = len(__import__("json").loads(payload)["events"])
+        batch_size = len(json.loads(payload)["events"])
         return httpx.Response(
             202,
             json={
@@ -274,5 +276,5 @@ async def test_generator_event_publisher_posts_batches_to_collector():
 
     assert result == {"accepted": 501, "duplicates": 0}
     assert len(requests) == 2
-    assert len(__import__("json").loads(requests[0].read())["events"]) == 500
-    assert len(__import__("json").loads(requests[1].read())["events"]) == 1
+    assert len(json.loads(requests[0].read())["events"]) == 500
+    assert len(json.loads(requests[1].read())["events"]) == 1
