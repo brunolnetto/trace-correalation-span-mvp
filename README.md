@@ -108,17 +108,18 @@ POST   /inventory/reservations/{reservation_id}/commit
 Receipts and adjustments require an `idempotency_key`; replaying the same
 key and payload does not apply the movement twice. Reusing the key with a
 different payload is rejected. Adjustments require a reason and cannot reduce
-physical stock below the already reserved quantity. Inactive products cannot receive new
-reservations, although their existing stock remains visible.
+physical stock below the already reserved quantity. Inactive products cannot
+be reserved, although their existing stock remains visible.
 
 The movement endpoint exposes the in-memory ledger for receipts, adjustments,
 reservations, releases, commits, and the demo opening balance.
 
 ### Reservation lifecycle and order processing
 
-The order Saga reserves inventory before charging payment. A successful
-order currently leaves its reservation in `reserved` state, representing
-allocated stock awaiting a later fulfillment step. The commit endpoint is
+The Order API reads the catalog price before starting the Saga. The order
+Saga then reserves inventory before charging payment. A successful order
+currently leaves its reservation in `reserved` state, representing allocated
+stock awaiting a later fulfillment step. The commit endpoint is
 available for that later step; the current order Saga does not yet model
 picking, shipping, or delivery.
 
@@ -151,8 +152,7 @@ curl -i -X POST http://localhost:18000/orders/123/process \
   -H 'X-Correlation-ID: 550e8400-e29b-41d4-a716-446655440001' \
   -d '{
     "product_id": 7,
-    "quantity": 2,
-    "amount": 99.90
+    "quantity": 2
   }'
 ```
 
@@ -163,9 +163,12 @@ The declarative Sagaz workflow executes:
    simulator.
 3. `confirm_order`: records the completed order in a process-local store.
 
-A payment amount greater than `PAYMENT_DECLINE_ABOVE` (default: `1000`)
-causes a deterministic payment decline. Sagaz then invokes
-`release_inventory` to compensate the successful reservation.
+The Order API looks up the product's current catalog price and computes
+`unit_price * quantity`; clients cannot override the charged amount. A
+catalog-derived total greater than `PAYMENT_DECLINE_ABOVE` (default: `1000`)
+causes a deterministic payment decline. Product 7 costs `99.90`, so a request
+for 11 units exercises this path. Sagaz then invokes `release_inventory`
+to compensate the successful reservation.
 
 If order confirmation fails after payment, Sagaz invokes
 `refund_payment` and then `release_inventory`. If a compensation starts but
