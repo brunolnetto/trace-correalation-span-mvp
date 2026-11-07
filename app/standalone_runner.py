@@ -5,7 +5,7 @@ import asyncio
 import json
 import os
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -60,13 +60,14 @@ class RunnerConfig:
             raise ValueError("product_id must be positive")
         if min(
             self.opening_stock,
-            self.reorder_point,
             self.order_quantity,
             self.first_batch_count,
             self.second_batch_count,
             self.lead_time_seconds,
         ) < 1:
             raise ValueError("scenario quantities and counts must be positive")
+        if self.reorder_point < 0:
+            raise ValueError("reorder_point must be non-negative")
         if self.target_stock <= self.reorder_point:
             raise ValueError("target_stock must exceed reorder_point")
         if self.request_timeout_seconds <= 0:
