@@ -214,7 +214,7 @@ services:
     build:
       context: .
       dockerfile: analytics/Dockerfile
-    profiles: ["analytics-runner"]
+    profiles: ["standalone"]
     working_dir: /workspace
     environment:
       SIMULATION_REPORT_PATH: /run-state/simulation-report.json
@@ -233,6 +233,8 @@ services:
     depends_on:
       event-collector:
         condition: service_healthy
+      simulation-runner:
+        condition: service_completed_successfully
 
 volumes:
   event-data:
