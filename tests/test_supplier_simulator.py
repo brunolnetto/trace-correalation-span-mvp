@@ -74,11 +74,12 @@ def inventory_double():
 
 
 @pytest.fixture
-def client(inventory_double):
-    return httpx.AsyncClient(
+async def client(inventory_double):
+    async with httpx.AsyncClient(
         transport=httpx.MockTransport(inventory_double.handler),
         base_url="http://inventory.test",
-    )
+    ) as value:
+        yield value
 
 
 @pytest.mark.asyncio
