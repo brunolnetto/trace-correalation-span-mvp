@@ -176,7 +176,7 @@ class JsonlEventStore:
                     separators=(",", ":"),
                     default=str,
                 )
-                + "\\n"
+                + "\n"
             )
             stream.flush()
             os.fsync(stream.fileno())
