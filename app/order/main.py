@@ -101,7 +101,7 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
     if not product["is_active"]:
         raise HTTPException(status_code=409, detail="Product is inactive.")
 
-    unit_price = Decimal(str(product["unit_price"]))
+    unit_price = Decimal(str(product["unit_price"])).quantize(Decimal("0.01"))
     amount = unit_price * request.quantity
     saga_id = str(uuid4())
     saga, compensation_tracker = create_order_processing_saga()
