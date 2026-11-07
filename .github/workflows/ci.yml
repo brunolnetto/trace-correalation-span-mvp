@@ -24,3 +24,10 @@ jobs:
         run: uv run pytest
       - name: Lint
         run: uv run ruff check .
+      - name: Install dbt analytics adapter
+        run: python -m pip install --no-cache-dir -r analytics/requirements.txt
+      - name: Build dbt analytics project
+        working-directory: analytics
+        env:
+          DUCKDB_PATH: target/ci.duckdb
+        run: dbt build --project-dir . --profiles-dir .
