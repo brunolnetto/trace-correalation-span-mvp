@@ -56,6 +56,22 @@ async def test_product_catalog_rejects_duplicate_skus_and_unknown_products():
     with pytest.raises(KeyError, match="does not exist"):
         await store.inventory_snapshot(999)
 
+    with pytest.raises(ValueError, match="whitespace"):
+        await store.update_product(
+            product_id,
+            ProductUpdate(sku="SKU-NEW", name="   "),
+        )
+    assert (await store.get_product(product_id))["sku"] == "SKU-001"
+    with pytest.raises(ValueError, match="already exists"):
+        await store.create_product(
+            ProductCreate(
+                sku="SKU-NEW",
+                name="Another product",
+                category="test",
+                unit_price=Decimal("2.00"),
+            )
+        )
+
 
 @pytest.mark.asyncio
 async def test_product_can_be_deactivated_but_existing_stock_is_preserved():
