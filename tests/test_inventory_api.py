@@ -140,7 +140,7 @@ async def test_receipt_reservation_release_and_inventory_projection():
     snapshot = await request("GET", f"/inventory/{product_id}")
     assert snapshot.json()["on_hand"] == 14
     assert snapshot.json()["reserved"] == 6
-    assert snapshot.json()["available"] == 8
+    assert snapshot.json()["available_quantity"] == 8
 
     released = await request(
         "DELETE",
@@ -148,7 +148,7 @@ async def test_receipt_reservation_release_and_inventory_projection():
     )
     assert released.json()["status"] == "released"
     snapshot = await request("GET", f"/inventory/{product_id}")
-    assert snapshot.json()["available"] == 14
+    assert snapshot.json()["available_quantity"] == 14
 
 
 @pytest.mark.asyncio
@@ -165,7 +165,7 @@ async def test_unknown_product_and_insufficient_stock_are_rejected():
     assert rejected.status_code == 409
 
     snapshot = await request("GET", f"/inventory/{product_id}")
-    assert snapshot.json()["available"] == 3
+    assert snapshot.json()["available_quantity"] == 3
 
 
 @pytest.mark.asyncio
