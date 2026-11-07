@@ -205,8 +205,6 @@ class InventoryStore:
                 owner = self._sku_index.get(sku)
                 if owner is not None and owner != product_id:
                     raise ValueError(f"SKU {sku} already exists")
-                self._sku_index.pop(product["sku"], None)
-                self._sku_index[sku] = product_id
                 changes["sku"] = sku
 
             for field in ("name", "category"):
@@ -214,6 +212,10 @@ class InventoryStore:
                     changes[field] = changes[field].strip()
                     if not changes[field]:
                         raise ValueError(f"{field} cannot contain only whitespace")
+
+            if "sku" in changes:
+                self._sku_index.pop(product["sku"], None)
+                self._sku_index[changes["sku"]] = product_id
 
             product.update(changes)
             product["updated_at"] = utc_now()
