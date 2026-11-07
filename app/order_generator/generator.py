@@ -11,7 +11,7 @@ import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
 
@@ -109,18 +109,23 @@ class OrderAttempt:
         return asdict(self)
 
 
-def _correlation_id(config: GeneratorConfig, index: int) -> str:
+def _correlation_id(
+    config: GeneratorConfig, index: int, execution_id: str | None = None
+) -> str:
+    namespace = execution_id or config.run_id
     return str(
         uuid5(
             NAMESPACE_URL,
             (
-                f"order-generator:{config.mode}:{config.seed}:"
+                f"order-generator:{namespace}:{config.mode}:{config.seed}:"
                 f"{config.product_id}:{config.first_order_id}:{index}"
             ),
         )
     )
 
-def build_plan(config: GeneratorConfig) -> list[OrderCommand]:
+def build_plan(
+    config: GeneratorConfig, *, execution_id: str | None = None
+) -> list[OrderCommand]:
     """Build a repeatable request plan from the seed and run configuration."""
     rng = random.Random(config.seed)
 
@@ -135,7 +140,7 @@ def build_plan(config: GeneratorConfig) -> list[OrderCommand]:
                 order_id=config.first_order_id + index,
                 product_id=config.product_id,
                 quantity=quantity,
-                correlation_id=_correlation_id(config, index),
+                correlation_id=_correlation_id(config, index, execution_id),
                 scenario=scenario,
                 expected_outcome=COVERAGE_EXPECTATIONS[scenario],
             )
@@ -147,7 +152,7 @@ def build_plan(config: GeneratorConfig) -> list[OrderCommand]:
             order_id=config.first_order_id + index,
             product_id=config.product_id,
             quantity=rng.randint(config.min_quantity, config.max_quantity),
-            correlation_id=_correlation_id(config, index),
+            correlation_id=_correlation_id(config, index, execution_id),
             scenario="random",
         )
         for index in range(config.count)
@@ -314,6 +319,8 @@ def build_generator_events(
     config: GeneratorConfig,
     attempts: list[OrderAttempt],
     summary: dict[str, Any],
+    *,
+    run_id: str,
 ) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for attempt in attempts:
@@ -328,7 +335,7 @@ def build_generator_events(
             "span_id": None,
             "attributes": {
                 **attempt.to_dict(),
-                "run_id": config.run_id,
+                "run_id": run_id,
                 "mode": config.mode,
                 "seed": config.seed,
             },
@@ -382,13 +389,16 @@ def emit_events(
     plan: list[OrderCommand],
     attempts: list[OrderAttempt],
     summary: dict[str, Any] | None = None,
+    *,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
+    effective_run_id = run_id or effective_run_id
     for attempt in attempts:
         print(
             json.dumps(
                 {
                     "event": "order_generator.attempt",
-                    "run_id": config.run_id,
+                    "run_id": effective_run_id,
                     "mode": config.mode,
                     "seed": config.seed,
                     **attempt.to_dict(),
@@ -397,13 +407,14 @@ def emit_events(
             )
         )
     result = summary if summary is not None else summarize(config, plan, attempts)
-    result.setdefault("run_id", config.run_id)
+    result.setdefault("run_id", effective_run_id)
     print(json.dumps(result, sort_keys=True))
     return result
 
 
 async def run(config: GeneratorConfig) -> dict[str, Any]:
-    plan = build_plan(config)
+    run_id = str(uuid4())
+    plan = build_plan(config, execution_id=run_id)
     async with httpx.AsyncClient(
         base_url=config.order_api_url.rstrip("/"),
         timeout=httpx.Timeout(10.0, connect=3.0),
@@ -411,9 +422,11 @@ async def run(config: GeneratorConfig) -> dict[str, Any]:
         attempts = await execute_plan(client, plan)
 
     summary = summarize(config, plan, attempts)
-    summary["run_id"] = config.run_id
+    summary["run_id"] = run_id
     if config.event_collector_url:
-        events = build_generator_events(config, attempts, summary)
+        events = build_generator_events(
+            config, attempts, summary, run_id=run_id
+        )
         try:
             async with httpx.AsyncClient(
                 base_url=config.event_collector_url.rstrip("/"),
@@ -432,7 +445,9 @@ async def run(config: GeneratorConfig) -> dict[str, Any]:
                 "error": f"{type(exc).__name__}: {exc}",
             }
             summary["exit_code"] = 1
-    return emit_events(config, plan, attempts, summary)
+    return emit_events(
+        config, plan, attempts, summary, run_id=run_id
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
