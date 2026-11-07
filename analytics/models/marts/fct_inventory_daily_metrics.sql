@@ -16,7 +16,7 @@ select
     ) as adjustment_delta,
     sum(
         case when movement_type = 'reservation_created'
-            then -quantity_delta_reserved else 0 end
+            then quantity_delta_reserved else 0 end
     ) as units_reserved,
     sum(
         case when movement_type = 'reservation_released'
