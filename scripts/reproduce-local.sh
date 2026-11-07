@@ -17,9 +17,11 @@ READ_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440000"
 PROCESS_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440001"
 DECLINE_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440002"
 INSUFFICIENT_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440003"
+SUPPLIER_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440004"
 ORDER_URL="${ORDER_URL:-http://127.0.0.1:18000}"
 INVENTORY_URL="${INVENTORY_URL:-http://127.0.0.1:18001}"
 JAEGER_URL="${JAEGER_URL:-http://127.0.0.1:16686}"
+SUPPLIER_URL="${SUPPLIER_URL:-http://127.0.0.1:18002}"
 EVENT_COLLECTOR_URL="${EVENT_COLLECTOR_URL:-http://127.0.0.1:18003}"
 WAIT_SECONDS="${WAIT_SECONDS:-60}"
 CLEANUP=0
@@ -87,6 +89,7 @@ wait_for_url "$INVENTORY_URL/healthz" "inventory-api"
 wait_for_url "$ORDER_URL/healthz" "order-api"
 wait_for_url "$JAEGER_URL/" "Jaeger UI"
 wait_for_url "$EVENT_COLLECTOR_URL/healthz" "event-collector"
+wait_for_url "$SUPPLIER_URL/healthz" "supplier-simulator"
 
 echo "==> 5/6: Create product, receive stock, and exercise order scenarios"
 curl --silent --show-error --fail \
@@ -153,6 +156,92 @@ INSUFFICIENT_STATUS="$(curl --silent --show-error \
   cat "$TMP_DIR/insufficient.json" >&2
   die "Expected insufficient inventory to return 409, got $INSUFFICIENT_STATUS"
 }
+
+echo "    exercising supplier onboarding, replenishment, and receipt"
+curl --silent --show-error --fail \
+  --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
+  --output "$TMP_DIR/supplier-onboard.json" \
+  --request POST "$SUPPLIER_URL/supplier-catalog/BEANS-250/onboard"
+
+SUPPLIER_PRODUCT_ID="$(python3 - "$TMP_DIR/supplier-onboard.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+print(json.loads(Path(sys.argv[1]).read_text())["product"]["product_id"])
+PY
+)"
+
+curl --silent --show-error --fail \
+  --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
+  --request POST \
+  "$SUPPLIER_URL/replenishments/evaluate?product_id=$SUPPLIER_PRODUCT_ID" \
+  > "$TMP_DIR/supplier-decision.json"
+
+PURCHASE_ORDER_ID="$(python3 - "$TMP_DIR/supplier-decision.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+decision = json.loads(Path(sys.argv[1]).read_text())["decisions"][0]
+assert decision["decision"] == "purchase_order_created", decision
+print(decision["purchase_order"]["purchase_order_id"])
+PY
+)"
+
+curl --silent --show-error --fail \
+  --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
+  --request POST \
+  "$SUPPLIER_URL/purchase-orders/$PURCHASE_ORDER_ID/order" \
+  > "$TMP_DIR/supplier-ordered.json"
+
+curl --silent --show-error --fail \
+  --header "Content-Type: application/json" \
+  --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
+  --data '{"seconds":3600}' \
+  "$SUPPLIER_URL/clock/advance" > "$TMP_DIR/supplier-clock.json"
+
+curl --silent --show-error --fail \
+  --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
+  --request POST \
+  "$SUPPLIER_URL/purchase-orders/$PURCHASE_ORDER_ID/receive" \
+  > "$TMP_DIR/supplier-received.json"
+
+curl --silent --show-error --fail \
+  --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
+  --request POST \
+  "$SUPPLIER_URL/replenishments/evaluate?product_id=$SUPPLIER_PRODUCT_ID" \
+  > "$TMP_DIR/supplier-recheck.json"
+
+curl --silent --show-error --fail \
+  --output "$TMP_DIR/supplier-inventory.json" \
+  "$INVENTORY_URL/inventory/$SUPPLIER_PRODUCT_ID"
+
+python3 - "$TMP_DIR/supplier-onboard.json" \
+  "$TMP_DIR/supplier-decision.json" "$TMP_DIR/supplier-ordered.json" \
+  "$TMP_DIR/supplier-received.json" "$TMP_DIR/supplier-recheck.json" \
+  "$TMP_DIR/supplier-inventory.json" "$SUPPLIER_PRODUCT_ID" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+onboard, decision, ordered, received, recheck, inventory, product_id = (
+    json.loads(Path(path).read_text()) for path in sys.argv[1:7]
+)
+assert onboard["product"]["product_id"] == int(product_id)
+assert decision["decisions"][0]["decision"] == "purchase_order_created"
+purchase_order = decision["decisions"][0]["purchase_order"]
+assert purchase_order["quantity"] == 48
+assert ordered["status"] == "ordered"
+assert received["status"] == "received"
+assert received["receipt_id"]
+assert recheck["decisions"][0]["decision"] == "no_reorder"
+assert inventory["on_hand"] == 48, inventory
+assert inventory["reserved"] == 0, inventory
+assert inventory["available_quantity"] == 48, inventory
+print("    supplier purchase order received 48 units exactly once")
+print("    inventory position above reorder point; no second PO created")
+PY
 
 curl --silent --show-error --fail --output "$TMP_DIR/inventory.json" "$INVENTORY_URL/inventory/7"
 curl --silent --show-error --fail --output "$TMP_DIR/low-stock.json" \
@@ -268,7 +357,7 @@ import json
 import sys
 from pathlib import Path
 
-path, process_id, decline_id, insufficient_id = sys.argv[1:]
+path, process_id, decline_id, insufficient_id, supplier_id = sys.argv[1:]
 records = []
 for line in Path(path).read_text().splitlines():
     try:
@@ -361,6 +450,13 @@ required = {
         "order.process.failed",
         "inventory.reservation.rejected",
     },
+    supplier_id: {
+        "supplier.product.onboarded",
+        "supplier.replenishment.evaluated",
+        "supplier.purchase_order.ordered",
+        "supplier.purchase_order.received",
+        "inventory.stock.received",
+    },
 }
 for correlation_id, messages in required.items():
     correlated = [
@@ -371,7 +467,12 @@ for correlation_id, messages in required.items():
     services = {event.get("service") for event in correlated}
     if not messages.issubset(found):
         raise SystemExit(1)
-    if not {"order-api", "inventory-api"}.issubset(services):
+    required_services = (
+        {"supplier-simulator", "inventory-api"}
+        if correlation_id == supplier_id
+        else {"order-api", "inventory-api"}
+    )
+    if not required_services.issubset(services):
         raise SystemExit(1)
     for event in correlated:
         if event.get("event_name") in messages:
@@ -397,6 +498,7 @@ echo "SUCCESS: Catalog, inventory, Saga, and observability reproduction passed."
 echo "  Order API:     $ORDER_URL"
 echo "  Inventory API: $INVENTORY_URL"
 echo "  Jaeger UI:     $JAEGER_URL"
+echo "  Supplier API:  $SUPPLIER_URL"
 echo "  Event API:     $EVENT_COLLECTOR_URL"
 echo
 if (( CLEANUP )); then
