@@ -206,6 +206,12 @@ def test_generator_plan_id_and_run_correlations_are_stable_and_unique():
         product_id=7,
         first_order_id=200,
     )
+    equivalent_config = GeneratorConfig(
+        mode="coverage",
+        seed=42,
+        product_id=7,
+        first_order_id=200,
+    )
     plan = build_plan(config)
     attempts = [
         OrderAttempt(
@@ -228,12 +234,9 @@ def test_generator_plan_id_and_run_correlations_are_stable_and_unique():
     )
     second_execution = build_plan(config, execution_id="coverage-run-002")
 
-    assert config.plan_id == GeneratorConfig(
-        mode="coverage",
-        seed=42,
-        product_id=7,
-        first_order_id=200,
-    ).run_id
+    # A plan identifies the deterministic workload; a run identifies one execution.
+    assert config.plan_id == equivalent_config.plan_id
+    assert config.plan_id
     assert len(events) == 4
     assert {event["event_name"] for event in events} == {
         "order_generator.attempt",
