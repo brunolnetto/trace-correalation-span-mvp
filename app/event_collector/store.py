@@ -7,9 +7,8 @@ import threading
 from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
