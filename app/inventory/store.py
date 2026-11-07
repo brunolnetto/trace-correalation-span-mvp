@@ -227,7 +227,7 @@ class InventoryStore:
 
     async def available_quantity(self, product_id: int) -> int:
         snapshot = await self.inventory_snapshot(product_id)
-        return snapshot["available"]
+        return snapshot["available_quantity"]
 
     async def receive_stock(
         self, product_id: int, request: InventoryReceiptRequest
