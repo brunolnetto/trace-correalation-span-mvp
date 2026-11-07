@@ -4,6 +4,7 @@ select
     event_id,
     occurred_at as generated_at,
     json_extract_string(attributes, '$.run_id') as run_id,
+    json_extract_string(attributes, '$.plan_id') as plan_id,
     json_extract_string(attributes, '$.mode') as mode,
     try_cast(json_extract_string(attributes, '$.seed') as bigint) as seed,
     try_cast(json_extract_string(attributes, '$.product_id') as bigint)
