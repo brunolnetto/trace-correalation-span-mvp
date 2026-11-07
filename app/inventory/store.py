@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 DEMO_PRODUCT_ID = 7
 DEMO_STOCK = 42
 
 
 def utc_now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class ProductCreate(BaseModel):
@@ -55,9 +55,16 @@ class InventoryReceiptRequest(BaseModel):
 
 
 class InventoryAdjustmentRequest(BaseModel):
-    quantity_delta: int = Field(ne=0)
+    quantity_delta: int
     reason: str = Field(min_length=1, max_length=256)
     idempotency_key: str = Field(min_length=1, max_length=128)
+
+    @field_validator("quantity_delta")
+    @classmethod
+    def quantity_delta_must_be_nonzero(cls, value: int) -> int:
+        if value == 0:
+            raise ValueError("quantity_delta must be non-zero")
+        return value
 
 
 class InventoryStore:
