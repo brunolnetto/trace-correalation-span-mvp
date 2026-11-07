@@ -83,6 +83,9 @@ models:
       - name: run_id
         tests:
           - not_null
+      - name: plan_id
+        tests:
+          - not_null
 
   - name: fct_order_generator_runs
     description: "Aggregate counters and latency statistics emitted by each run."
@@ -91,6 +94,9 @@ models:
         tests:
           - not_null
           - unique
+      - name: plan_id
+        tests:
+          - not_null
 
   - name: fct_order_reconciliation
     description: "Compares each generator result with the Order API event-derived outcome."
