@@ -90,7 +90,10 @@ wait_for_runner() {
   local exit_code
 
   echo "Waiting for ${service} to finish..."
-  if "${COMPOSE[@]}" wait "$service"; then
+  # Compose wait only attaches to containers that are still running. If a
+  # one-shot job already exited between up and this command, Compose reports
+  # "no containers for project"; ps --all below is the source of truth.
+  if "${COMPOSE[@]}" wait "$service" >/dev/null 2>&1; then
     :
   else
     wait_status=$?

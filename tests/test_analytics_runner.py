@@ -160,6 +160,33 @@ def test_dbt_failure_preserves_exit_code_and_report(
     assert Path(config.report_path).is_file()
 
 
+def test_dbt_failure_does_not_reuse_previous_run_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config(tmp_path)
+    target = Path(config.target_path)
+    _run_results(target)
+    old_results = target / "run_results.json"
+    assert old_results.is_file()
+
+    def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            command, 43, "", "intentional dbt failure"
+        )
+
+    monkeypatch.setattr("app.analytics_runner.subprocess.run", fake_run)
+    report = run_analytics(config)
+
+    assert report["status"] == "failed"
+    assert report["exit_code"] == 43
+    assert report["runner_exit_code"] == 1
+    assert report["dbt_summary"] is None
+    assert "was not created" in report["dbt_artifact_error"]
+    assert report["failure"]["type"] == "DbtBuildError"
+    assert "status 43" in report["failure"]["message"]
+    assert not old_results.exists()
+
+
 @pytest.mark.parametrize(
     ("artifact_content", "expected_message"),
     [

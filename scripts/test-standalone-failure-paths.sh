@@ -136,6 +136,8 @@ assert analytics["status"] == "failed", analytics
 assert analytics["simulation_run_id"] == simulation["run_id"], analytics
 assert analytics["exit_code"] == 43, analytics
 assert analytics["runner_exit_code"] == 1, analytics
+assert analytics["dbt_summary"] is None, analytics
+assert "was not created" in analytics["dbt_artifact_error"], analytics
 assert analytics["failure"], analytics
 
 print("    Simulation report and Analytics failure report refer to the same run.")

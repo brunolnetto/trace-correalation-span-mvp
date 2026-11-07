@@ -165,6 +165,7 @@ def run_analytics(config: RunnerConfig) -> dict[str, Any]:
         "runner_exit_code": 1,
         "dbt_summary": None,
         "dbt_run_results_path": str(Path(config.target_path) / "run_results.json"),
+        "dbt_artifact_error": None,
         "failure": None,
     }
 
@@ -187,6 +188,12 @@ def run_analytics(config: RunnerConfig) -> dict[str, Any]:
         target_path = Path(config.target_path)
         target_path.mkdir(parents=True, exist_ok=True)
         Path(config.duckdb_path).parent.mkdir(parents=True, exist_ok=True)
+
+        # The target directory is on a persistent volume. Remove the previous
+        # run's summary so a failed dbt invocation cannot be reported with stale
+        # results from an earlier successful build.
+        run_results_path = target_path / "run_results.json"
+        run_results_path.unlink(missing_ok=True)
 
         command = [
             config.dbt_executable,
@@ -243,11 +250,10 @@ def run_analytics(config: RunnerConfig) -> dict[str, Any]:
             report["stderr_tail"] = stderr[-4000:]
 
         try:
-            report["dbt_summary"] = _parse_dbt_summary(
-                Path(config.target_path) / "run_results.json"
-            )
+            report["dbt_summary"] = _parse_dbt_summary(run_results_path)
         except AnalyticsRunnerError as exc:
-            if report["failure"] is None:
+            report["dbt_artifact_error"] = str(exc)
+            if report["exit_code"] == 0 and report["failure"] is None:
                 report["failure"] = {
                     "type": type(exc).__name__,
                     "message": str(exc),
