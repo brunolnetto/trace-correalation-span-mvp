@@ -228,3 +228,29 @@ async def test_standalone_scenario_fails_fast_and_writes_report_on_wrong_opening
     assert report["status"] == "failed"
     assert report["error"]["type"] == "ScenarioError"
     assert state["order_requests"] == []
+
+
+@pytest.mark.asyncio
+async def test_standalone_scenario_stops_when_an_order_is_not_successful(
+    tmp_path: Path,
+):
+    transport, state = _scenario_transport(reject_order_number=1)
+    report_path = tmp_path / "order-failure-report.json"
+    config = RunnerConfig(
+        order_api_url="http://order-api",
+        inventory_api_url="http://inventory-api",
+        supplier_api_url="http://supplier-api",
+        event_collector_url="http://event-collector",
+        report_path=str(report_path),
+        run_id="order-failure-run",
+    )
+
+    with pytest.raises(ScenarioError, match="expected 8 successful"):
+        await run_scenario(config, transport=transport)
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["status"] == "failed"
+    assert "unexpected outcomes" in report["error"]["message"]
+    assert len(state["order_requests"]) == 8
+    assert state["purchase_order"] is None
+    assert state["collector_events"] == []
