@@ -1,14 +1,26 @@
 from __future__ import annotations
 
-from decimal import Decimal
 from importlib import import_module
 
 import httpx
 import pytest
 
+from app import observability
 from app.inventory.store import InventoryStore
 
-inventory_module = import_module("app.inventory.main")
+configure_observability = observability.configure_observability
+
+
+def skip_observability_setup(app, service_name):
+    return None
+
+
+observability.configure_observability = skip_observability_setup
+try:
+    inventory_module = import_module("app.inventory.main")
+finally:
+    observability.configure_observability = configure_observability
+
 inventory_app = inventory_module.app
 
 
