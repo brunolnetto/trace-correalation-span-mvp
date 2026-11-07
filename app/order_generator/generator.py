@@ -352,7 +352,11 @@ def build_generator_events(
         "correlation_id": None,
         "trace_id": None,
         "span_id": None,
-        "attributes": summary,
+        "attributes": {
+            **summary,
+            "run_id": run_id,
+            "plan_id": config.plan_id,
+        },
     }
     events.append(build_event_envelope(summary_source))
     return events
