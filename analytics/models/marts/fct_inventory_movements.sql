@@ -7,6 +7,8 @@ with inventory_events as (
         correlation_id,
         event_name,
         json_extract_string(attributes, '$.movement_type') as logged_movement_type,
+        json_extract_string(attributes, '$.receipt_id') as receipt_id,
+        json_extract_string(attributes, '$.movement_id') as movement_id,
         try_cast(
             json_extract_string(attributes, '$.product_id') as bigint
         ) as product_id,
@@ -49,10 +51,34 @@ classified as (
             end
         ) as movement_type
     from inventory_events
+),
+
+identified as (
+    select
+        *,
+        case
+            when movement_type = 'receipt'
+                then coalesce(receipt_id, event_id)
+            when movement_type = 'adjustment'
+                then coalesce(movement_id, event_id)
+            else coalesce(reservation_id, event_id)
+        end as movement_identity
+    from classified
+),
+
+deduplicated as (
+    select
+        *,
+        row_number() over (
+            partition by movement_type, movement_identity
+            order by movement_at, event_id
+        ) as movement_occurrence
+    from identified
 )
 
 select
-    event_id as movement_event_id,
+    movement_type || ':' || movement_identity as movement_event_id,
+    event_id as source_event_id,
     movement_at,
     cast(movement_at as date) as movement_date,
     correlation_id,
@@ -60,6 +86,8 @@ select
     order_id,
     saga_id,
     reservation_id,
+    receipt_id,
+    movement_id,
     movement_type,
     case
         when movement_type = 'receipt' then coalesce(quantity, 0)
@@ -75,4 +103,5 @@ select
         ) then -coalesce(quantity, 0)
         else 0
     end as quantity_delta_reserved
-from classified
+from deduplicated
+where movement_occurrence = 1
