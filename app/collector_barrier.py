@@ -13,7 +13,6 @@ ORDER_EVENT_NAMES = (
     "order.process.started",
     "order.process.completed",
     "inventory.reservation.created",
-    "inventory.reservation.committed",
 )
 
 SUPPLIER_EVENT_COUNTS = {
