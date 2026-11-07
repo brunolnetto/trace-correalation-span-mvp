@@ -5,8 +5,10 @@ distributed tracing, Saga-based order processing, and an explicit product
 catalog and inventory lifecycle.
 
 The project uses [Sagaz](https://github.com/brunolnetto/sagaz) to orchestrate
-order processing and compensation. The Inventory API owns a product catalog,
-stock balances, reservations, and an in-memory movement ledger.
+order processing and compensation. The Inventory API owns the product catalog,
+stock balances, reservations, and movement ledger. A Supplier Simulation API
+models onboarding and replenishment; a versioned Event Collector persists
+structured service events for dbt analytics.
 
 ## Architecture
 
@@ -36,8 +38,9 @@ Inventory API
   |-- Reservations, Release, and Commit
   |-- Inventory Movement Ledger
 
-Both services export OTLP traces to Jaeger.
-Both services emit structured JSON logs to stdout.
+Order, Inventory, Supplier, and Event Collector services export OTLP traces
+to Jaeger and emit structured JSON logs. Order, Inventory, and Supplier logs
+are also forwarded asynchronously to the raw event collector.
 ```
 
 - **correlation_id** identifies the business operation across services.
@@ -357,6 +360,24 @@ in process memory; a durable producer outbox is a future hardening step.
 The collector is a single-writer MVP; do not mount the same JSONL files into
 multiple collector replicas.
 
+## dbt analytics
+
+The `analytics/` project uses dbt-duckdb over the raw event contract. It
+builds order outcomes, inventory movement facts, supplier purchase-order
+facts, generator run metrics, and a correlation-level reconciliation between
+generator attempts and the service outcomes observed by the collector.
+
+After producing traffic with the order generator, run:
+
+```bash
+docker compose --profile analytics run --build --rm analytics
+```
+
+The analytics container mounts the raw event volume read-only and persists its
+DuckDB database in a separate `analytics-data` volume. If the collector volume
+is empty, dbt uses the included fixture dataset. For model details and local
+commands see [analytics/README.md](analytics/README.md).
+
 ## Reproduce locally (recommended)
 
 Requirements: Docker Engine, Docker Compose v2, `uv`, and `curl`. The script
@@ -461,17 +482,20 @@ compensation behavior.
 
 ## Scope and limitations
 
-The catalog, inventory balances, reservations, receipts, and movement ledger
-are process-local and are lost on restart. The async lock protects one
+The catalog, inventory balances, reservations, receipts, movement ledger,
+supplier policies, and supplier purchase-order state are process-local and are
+lost on service restart. The async lock protects one
 Inventory API process only; running multiple replicas would create divergent
 balances and could oversell. PostgreSQL transactions/row locks and durable
 idempotency are the next storage step before horizontal scaling. The current
 movement ledger is an in-memory domain record, not a durable event log.
 
-This MVP sends traces directly to Jaeger and writes logs to container stdout.
-It does not include an OpenTelemetry Collector, a log aggregation backend,
-durable business storage, a production payment provider, a transactional
-outbox, authentication, supplier purchase orders, automated replenishment,
-or production deployment hardening. Sagaz is used for workflow orchestration
+This MVP sends traces directly to Jaeger and writes logs to container stdout;
+selected structured logs are also stored in append-only raw JSONL files by the
+Event Collector. It does not include an OpenTelemetry Collector, a full log
+search backend, durable business storage, a production payment provider, a
+transactional producer outbox, authentication, or production deployment
+hardening. The event collector is single-writer and its producer queue is
+best-effort before acknowledgement. Sagaz is used for workflow orchestration
 and compensation; its in-memory configuration here is not a substitute for
 durable state and reconciliation infrastructure.
