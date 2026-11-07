@@ -254,5 +254,8 @@ async def test_standalone_scenario_stops_when_an_order_is_not_successful(
     assert len(state["order_requests"]) == 8
     assert state["purchase_order"] is None
     assert len(state["collector_events"]) == 9
-    assert report["order_batches"][0]["unexpected_outcomes"][0]["outcome"] == "inventory_rejected"
+    assert (
+        report["order_batches"][0]["unexpected_outcomes"][0]["outcome"]
+        == "inventory_rejected"
+    )
     assert len(report["correlation_ids"]["orders"]) == 8
