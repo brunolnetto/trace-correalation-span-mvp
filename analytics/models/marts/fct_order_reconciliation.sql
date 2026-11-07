@@ -2,6 +2,7 @@
 
 select
     attempts.run_id,
+    attempts.plan_id,
     attempts.correlation_id,
     attempts.order_id,
     attempts.product_id,
