@@ -217,6 +217,17 @@ async def test_adjustment_endpoint_is_idempotent_and_rejects_negative_stock():
     snapshot = await request("GET", f"/inventory/{product_id}")
     assert snapshot.json()["on_hand"] == 8
 
+    zero_adjustment = await request(
+        "POST",
+        f"/inventory/{product_id}/adjustments",
+        json={
+            "quantity_delta": 0,
+            "reason": "zero movement",
+            "idempotency_key": "stock-count-zero",
+        },
+    )
+    assert zero_adjustment.status_code == 422
+
     rejected = await request(
         "POST",
         f"/inventory/{product_id}/adjustments",
