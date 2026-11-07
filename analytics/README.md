@@ -44,7 +44,9 @@ service events.
 - `fct_orders`: one row per `correlation_id`, classified from explicit
   Order/Inventory events.
 - `fct_inventory_movements`: on-hand and reserved deltas reconstructed only
-  from explicit Inventory API movement log events.
+  from explicit Inventory API movement log events. Replayed receipts,
+  adjustments, and reservation transitions are deduplicated using the source
+  movement/receipt/reservation identity rather than the log event ID.
 - `fct_order_generator_attempts` and `fct_order_generator_runs`: generator
   requests and aggregate run metrics, with deterministic `plan_id` separated
   from unique execution `run_id`.
@@ -56,6 +58,8 @@ service events.
 - `fct_supplier_replenishment_decisions`,
   `fct_supplier_purchase_orders`, and `fct_supplier_daily_metrics`: reorder
   decisions and the created/ordered/received/cancelled purchase-order lifecycle.
+  Repeated lifecycle log events are deduplicated by purchase order and
+  transition.
 
 The collector envelope keeps `correlation_id`, `trace_id`, and `span_id`
 as separate fields. A correlation ID is a business request identifier, not a
