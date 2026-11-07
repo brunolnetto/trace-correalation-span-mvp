@@ -132,7 +132,9 @@ def test_malformed_persisted_line_is_preserved_and_quarantined_on_recovery(
     assert len(quarantined) == 1
     assert "recovery_error" in quarantined[0]["reason"]
 
-\n\ndef test_batch_deduplicates_repeated_id_within_the_same_request(tmp_path: Path):
+
+
+def test_batch_deduplicates_repeated_id_within_the_same_request(tmp_path: Path):
     store = JsonlEventStore(
         tmp_path / "events.jsonl",
         tmp_path / "quarantine.jsonl",

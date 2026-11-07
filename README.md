@@ -5,8 +5,10 @@ distributed tracing, Saga-based order processing, and an explicit product
 catalog and inventory lifecycle.
 
 The project uses [Sagaz](https://github.com/brunolnetto/sagaz) to orchestrate
-order processing and compensation. The Inventory API owns a product catalog,
-stock balances, reservations, and an in-memory movement ledger.
+order processing and compensation. The Inventory API owns the product catalog,
+stock balances, reservations, and movement ledger. A Supplier Simulation API
+models onboarding and replenishment; a versioned Event Collector persists
+structured service events for dbt analytics.
 
 ## Architecture
 
@@ -36,8 +38,26 @@ Inventory API
   |-- Reservations, Release, and Commit
   |-- Inventory Movement Ledger
 
-Both services export OTLP traces to Jaeger.
-Both services emit structured JSON logs to stdout.
+Supplier Simulation API
+  |-- Supplier Fixture Catalog
+  |-- Reorder Policies and Purchase Orders
+  |-- Simulated Lead-Time Clock
+  +-- Idempotent receipts through Inventory API
+
+Order, Inventory, and Supplier JSON logs
+  |
+  | bounded asynchronous publisher
+  v
+Event Collector
+  |-- Versioned Event Envelope
+  |-- Append-only JSONL + Quarantine
+  +-- Persistent Docker Volume
+         |
+         v
+      dbt + DuckDB Analytics
+
+Services export OTLP traces to Jaeger. Order, Inventory, and Supplier logs
+are forwarded asynchronously to the raw event collector.
 ```
 
 - **correlation_id** identifies the business operation across services.
@@ -184,9 +204,11 @@ rejects overselling within one process.
 ## Deterministic order generator
 
 A one-shot generator exercises the public Order API; it never changes inventory
-state directly. Its seed determines the generated quantities, order IDs, and
-correlation IDs, making scenario input reproducible across runs. Latency is
-measured at runtime and therefore is not expected to be identical.
+state directly. Its seed determines quantities and order IDs, so a
+`plan_id` identifies the same workload definition. Each invocation gets a
+unique `run_id` and unique per-attempt `correlation_id` values, preventing
+separate executions from being conflated in analytics. Latency is measured at
+runtime and is not expected to be identical.
 
 Start the normal Compose services, then run a seeded random batch:
 
@@ -357,6 +379,24 @@ in process memory; a durable producer outbox is a future hardening step.
 The collector is a single-writer MVP; do not mount the same JSONL files into
 multiple collector replicas.
 
+## dbt analytics
+
+The `analytics/` project uses dbt-duckdb over the raw event contract. It
+builds order outcomes, inventory movement facts, supplier purchase-order
+facts, generator run metrics, and a correlation-level reconciliation between
+generator attempts and the service outcomes observed by the collector.
+
+After producing traffic with the order generator, run:
+
+```bash
+docker compose --profile analytics run --build --rm analytics
+```
+
+The analytics container mounts the raw event volume read-only and persists its
+DuckDB database in a separate `analytics-data` volume. If the collector volume
+is empty, dbt uses the included fixture dataset. For model details and local
+commands see [analytics/README.md](analytics/README.md).
+
 ## Reproduce locally (recommended)
 
 Requirements: Docker Engine, Docker Compose v2, `uv`, and `curl`. The script
@@ -370,13 +410,16 @@ bash scripts/reproduce-local.sh
 ```
 
 The script resolves/synchronizes dependencies, runs pytest and Ruff, builds
-and starts Jaeger plus both APIs, waits for readiness, creates a low-stock
-product and receives its initial stock, exercises a successful order, a
-payment decline with compensation, and an insufficient-stock rejection. It
-then verifies the inventory balances, correlated JSON logs, and a
-cross-service trace in Jaeger. It leaves the Compose stack running for
-inspection; stop it with `docker compose down`. Pass `--cleanup` to stop the
-stack automatically when the script exits.
+and starts Jaeger, the Order/Inventory APIs, the Supplier Simulation API, and
+the Event Collector. It exercises a successful order, a payment decline with
+compensation, an insufficient-stock rejection, supplier onboarding and
+replenishment through a simulated lead time, and the generator's three
+coverage scenarios. It verifies balances, correlated JSON logs, cross-service
+Jaeger traces, and raw event persistence for order, supplier, and generator
+events, then runs `dbt build` against the collected raw event volume. It
+leaves the Compose stack running for inspection; stop it with
+`docker compose down`. Pass `--cleanup` to stop the stack automatically
+when the script exits.
 
 After changing dependencies, regenerate and commit the lockfile:
 
@@ -395,8 +438,8 @@ uv lock --python 3.12
 docker compose up --build
 ```
 
-The APIs are exposed on host ports `18000` (Order) and `18001` (Inventory)
-to avoid conflicts with common local development services. Jaeger UI is
+The APIs are exposed on host ports `18000` (Order), `18001` (Inventory),
+`18002` (Supplier Simulation), and `18003` (Event Collector). Jaeger UI is
 available on port `16686`. Compose explicitly enables
 `INVENTORY_SEED_DEMO_DATA`, which creates product 7 with 42 units. The
 Inventory API does not assume stock for unknown product IDs.
@@ -452,26 +495,30 @@ uv run pytest
 uv run ruff check .
 ```
 
-The tests cover correlation ID preservation, generation, invalid/oversized
-input replacement, JSON log fields, W3C trace-context round trips, concurrent
-saga context isolation, explicit product creation, duplicate SKU rejection,
-idempotent receipts, inventory ledger entries, reservation/release/commit
-semantics, adjustment invariants, oversell prevention, order processing, and
-compensation behavior.
+The tests cover correlation ID preservation, W3C trace-context propagation,
+concurrent Saga context isolation, product/catalog and inventory invariants,
+idempotent receipts and reservations, oversell prevention, order processing
+and compensation, deterministic generator plans and publication, supplier
+onboarding/replenishment/lead-time behavior, and raw event schema validation,
+append durability, replay deduplication, and quarantine. CI also builds the
+dbt project against its versioned fixture dataset.
 
 ## Scope and limitations
 
-The catalog, inventory balances, reservations, receipts, and movement ledger
-are process-local and are lost on restart. The async lock protects one
+The catalog, inventory balances, reservations, receipts, movement ledger,
+supplier policies, and supplier purchase-order state are process-local and are
+lost on service restart. The async lock protects one
 Inventory API process only; running multiple replicas would create divergent
 balances and could oversell. PostgreSQL transactions/row locks and durable
 idempotency are the next storage step before horizontal scaling. The current
 movement ledger is an in-memory domain record, not a durable event log.
 
-This MVP sends traces directly to Jaeger and writes logs to container stdout.
-It does not include an OpenTelemetry Collector, a log aggregation backend,
-durable business storage, a production payment provider, a transactional
-outbox, authentication, supplier purchase orders, automated replenishment,
-or production deployment hardening. Sagaz is used for workflow orchestration
+This MVP sends traces directly to Jaeger and writes logs to container stdout;
+selected structured logs are also stored in append-only raw JSONL files by the
+Event Collector. It does not include an OpenTelemetry Collector, a full log
+search backend, durable business storage, a production payment provider, a
+transactional producer outbox, authentication, or production deployment
+hardening. The event collector is single-writer and its producer queue is
+best-effort before acknowledgement. Sagaz is used for workflow orchestration
 and compensation; its in-memory configuration here is not a substitute for
 durable state and reconciliation infrastructure.

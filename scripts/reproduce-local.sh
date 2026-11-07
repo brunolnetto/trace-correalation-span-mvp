@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Reproduce the Saga + inventory + observability flow:
-# uv tests/lint -> build/start services -> catalog/stock setup ->
-# success + compensation + insufficient-stock scenarios -> trace/log checks.
+# Reproduce the catalog, order, supplier, raw-event and observability flow:
+# uv tests/lint -> start services -> order scenarios -> supplier replenishment ->
+# generator coverage -> Jaeger/log/raw-event verification -> dbt build.
 #
 # Usage:
 #   ./scripts/reproduce-local.sh
@@ -13,13 +13,11 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-READ_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440000"
-PROCESS_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440001"
-DECLINE_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440002"
-INSUFFICIENT_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440003"
+REPRO_CORRELATION_IDS=()
 ORDER_URL="${ORDER_URL:-http://127.0.0.1:18000}"
 INVENTORY_URL="${INVENTORY_URL:-http://127.0.0.1:18001}"
 JAEGER_URL="${JAEGER_URL:-http://127.0.0.1:16686}"
+SUPPLIER_URL="${SUPPLIER_URL:-http://127.0.0.1:18002}"
 EVENT_COLLECTOR_URL="${EVENT_COLLECTOR_URL:-http://127.0.0.1:18003}"
 WAIT_SECONDS="${WAIT_SECONDS:-60}"
 CLEANUP=0
@@ -39,6 +37,20 @@ require_command docker
 require_command curl
 require_command python3
 require_command uv
+mapfile -t REPRO_CORRELATION_IDS < <(
+  python3 - <<'PY'
+import uuid
+
+for _ in range(5):
+    print(uuid.uuid4())
+PY
+)
+[[ ${#REPRO_CORRELATION_IDS[@]} -eq 5 ]] || die "Could not generate unique reproduction correlation IDs"
+READ_CORRELATION_ID="${REPRO_CORRELATION_IDS[0]}"
+PROCESS_CORRELATION_ID="${REPRO_CORRELATION_IDS[1]}"
+DECLINE_CORRELATION_ID="${REPRO_CORRELATION_IDS[2]}"
+INSUFFICIENT_CORRELATION_ID="${REPRO_CORRELATION_IDS[3]}"
+SUPPLIER_CORRELATION_ID="${REPRO_CORRELATION_IDS[4]}"
 docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required"
 docker info >/dev/null 2>&1 || die "Docker daemon is not reachable"
 
@@ -49,7 +61,7 @@ if (( CLEANUP )); then
   trap 'docker compose down --remove-orphans || true; cleanup_tmp' EXIT
 fi
 
-echo "==> 1/6: Resolve and install Python dependencies"
+echo "==> 1/7: Resolve and install Python dependencies"
 uv lock --python 3.12
 uv sync --python 3.12 --all-groups --locked
 [[ -f uv.lock ]] || die "uv did not create uv.lock"
@@ -57,13 +69,14 @@ if ! git ls-files --error-unmatch uv.lock >/dev/null 2>&1; then
   echo "NOTE: uv.lock is generated locally but is not committed. Review and commit it for repeatable installs."
 fi
 
-echo "==> 2/6: Run unit and concurrency tests"
+echo "==> 2/7: Run unit and concurrency tests"
 uv run --python 3.12 pytest
 
-echo "==> 3/6: Run Ruff"
+echo "==> 3/7: Run Ruff"
 uv run --python 3.12 ruff check .
 
-echo "==> 4/6: Build and start Jaeger plus both APIs"
+echo "==> 4/7: Build and start Jaeger, APIs, supplier, and event collector"
+docker compose down --remove-orphans
 docker compose up --build --detach
 
 wait_for_url() {
@@ -87,8 +100,9 @@ wait_for_url "$INVENTORY_URL/healthz" "inventory-api"
 wait_for_url "$ORDER_URL/healthz" "order-api"
 wait_for_url "$JAEGER_URL/" "Jaeger UI"
 wait_for_url "$EVENT_COLLECTOR_URL/healthz" "event-collector"
+wait_for_url "$SUPPLIER_URL/healthz" "supplier-simulator"
 
-echo "==> 5/6: Create product, receive stock, and exercise order scenarios"
+echo "==> 5/7: Exercise catalog, orders, and supplier replenishment"
 curl --silent --show-error --fail \
   --header "Content-Type: application/json" \
   --data '{"sku":"LOW-STOCK-001","name":"Low stock demo product","category":"demo","unit_price":"10.00"}' \
@@ -153,6 +167,93 @@ INSUFFICIENT_STATUS="$(curl --silent --show-error \
   cat "$TMP_DIR/insufficient.json" >&2
   die "Expected insufficient inventory to return 409, got $INSUFFICIENT_STATUS"
 }
+
+echo "    exercising supplier onboarding, replenishment, and receipt"
+curl --silent --show-error --fail \
+  --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
+  --output "$TMP_DIR/supplier-onboard.json" \
+  --request POST "$SUPPLIER_URL/supplier-catalog/BEANS-250/onboard"
+
+SUPPLIER_PRODUCT_ID="$(python3 - "$TMP_DIR/supplier-onboard.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+print(json.loads(Path(sys.argv[1]).read_text())["product"]["product_id"])
+PY
+)"
+
+curl --silent --show-error --fail \
+  --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
+  --request POST \
+  "$SUPPLIER_URL/replenishments/evaluate?product_id=$SUPPLIER_PRODUCT_ID" \
+  > "$TMP_DIR/supplier-decision.json"
+
+PURCHASE_ORDER_ID="$(python3 - "$TMP_DIR/supplier-decision.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+decision = json.loads(Path(sys.argv[1]).read_text())["decisions"][0]
+assert decision["decision"] == "purchase_order_created", decision
+print(decision["purchase_order"]["purchase_order_id"])
+PY
+)"
+
+curl --silent --show-error --fail \
+  --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
+  --request POST \
+  "$SUPPLIER_URL/purchase-orders/$PURCHASE_ORDER_ID/order" \
+  > "$TMP_DIR/supplier-ordered.json"
+
+curl --silent --show-error --fail \
+  --header "Content-Type: application/json" \
+  --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
+  --data '{"seconds":3600}' \
+  "$SUPPLIER_URL/clock/advance" > "$TMP_DIR/supplier-clock.json"
+
+curl --silent --show-error --fail \
+  --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
+  --request POST \
+  "$SUPPLIER_URL/purchase-orders/$PURCHASE_ORDER_ID/receive" \
+  > "$TMP_DIR/supplier-received.json"
+
+curl --silent --show-error --fail \
+  --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
+  --request POST \
+  "$SUPPLIER_URL/replenishments/evaluate?product_id=$SUPPLIER_PRODUCT_ID" \
+  > "$TMP_DIR/supplier-recheck.json"
+
+curl --silent --show-error --fail \
+  --output "$TMP_DIR/supplier-inventory.json" \
+  "$INVENTORY_URL/inventory/$SUPPLIER_PRODUCT_ID"
+
+python3 - "$TMP_DIR/supplier-onboard.json" \
+  "$TMP_DIR/supplier-decision.json" "$TMP_DIR/supplier-ordered.json" \
+  "$TMP_DIR/supplier-received.json" "$TMP_DIR/supplier-recheck.json" \
+  "$TMP_DIR/supplier-inventory.json" "$SUPPLIER_PRODUCT_ID" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+onboard, decision, ordered, received, recheck, inventory = (
+    json.loads(Path(path).read_text()) for path in sys.argv[1:7]
+)
+product_id = sys.argv[7]
+assert onboard["product"]["product_id"] == int(product_id)
+assert decision["decisions"][0]["decision"] == "purchase_order_created"
+purchase_order = decision["decisions"][0]["purchase_order"]
+assert purchase_order["quantity"] == 48
+assert ordered["status"] == "ordered"
+assert received["status"] == "received"
+assert received["receipt_id"]
+assert recheck["decisions"][0]["decision"] == "no_reorder"
+assert inventory["on_hand"] == 48, inventory
+assert inventory["reserved"] == 0, inventory
+assert inventory["available_quantity"] == 48, inventory
+print("    supplier purchase order received 48 units exactly once")
+print("    inventory position above reorder point; no second PO created")
+PY
 
 curl --silent --show-error --fail --output "$TMP_DIR/inventory.json" "$INVENTORY_URL/inventory/7"
 curl --silent --show-error --fail --output "$TMP_DIR/low-stock.json" \
@@ -222,13 +323,45 @@ print("    inventory after compensation: on_hand=42 reserved=2 available=40")
 print("    insufficient-stock order rejected without changing inventory")
 PY
 
-echo "==> 6/6: Verify JSON logs and Saga traces in Jaeger"
-TRACE_URL="$JAEGER_URL/api/traces?service=order-api&limit=50&lookback=1h"
+echo "    running generator coverage and publishing attempts to raw storage"
+docker compose --profile simulation run --build --no-deps --rm order-generator \
+  python -m app.order_generator --mode coverage \
+  > "$TMP_DIR/generator.log"
+
+echo "==> 6/7: Verify JSON logs, Saga traces, and raw event collection"
+docker compose logs --no-log-prefix --no-color order-api inventory-api > "$TMP_DIR/service.log"
+
+# Resolve the exact trace from the declined request's correlation ID. Querying
+# Jaeger's first N traces is lossy because generator/collector traffic can push
+# the manual saga trace out of the capped result set.
+DECLINE_TRACE_ID="$(python3 - "$TMP_DIR/service.log" "$DECLINE_CORRELATION_ID" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path, correlation_id = sys.argv[1:]
+for line in Path(path).read_text().splitlines():
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if (
+        record.get("correlation_id") == correlation_id
+        and record.get("message") == "order.process.failed"
+        and record.get("trace_id")
+    ):
+        print(record["trace_id"])
+        break
+PY
+)"
+[[ -n "$DECLINE_TRACE_ID" ]] || die "Could not resolve trace ID for declined order $DECLINE_CORRELATION_ID"
+
+TRACE_URL="$JAEGER_URL/api/traces/$DECLINE_TRACE_ID"
 TRACE_FOUND=0
 deadline=$((SECONDS + WAIT_SECONDS))
 while (( SECONDS < deadline )); do
-  if curl --silent --show-error --fail "$TRACE_URL" -o "$TMP_DIR/traces.json"; then
-    if python3 - "$TMP_DIR/traces.json" <<'PY'
+  if curl --silent --show-error --fail "$TRACE_URL" -o "$TMP_DIR/trace.json"; then
+    if python3 - "$TMP_DIR/trace.json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -255,13 +388,11 @@ PY
 done
 
 if (( ! TRACE_FOUND )); then
-  echo "Jaeger did not return the expected compensation trace." >&2
+  echo "Jaeger did not return the expected compensation trace $DECLINE_TRACE_ID." >&2
   docker compose logs --tail=150 >&2 || true
-  die "Trace validation failed; inspect $JAEGER_URL"
+  die "Trace validation failed; inspect $TRACE_URL"
 fi
-echo "    Jaeger contains a cross-service reservation + compensation trace"
-
-docker compose logs --no-log-prefix --no-color order-api inventory-api > "$TMP_DIR/service.log"
+echo "    Jaeger contains declined-order trace $DECLINE_TRACE_ID with cross-service reservation + compensation"
 python3 - "$TMP_DIR/service.log" "$PROCESS_CORRELATION_ID" \
   "$DECLINE_CORRELATION_ID" "$INSUFFICIENT_CORRELATION_ID" <<'PY'
 import json
@@ -338,14 +469,36 @@ while (( SECONDS < deadline )); do
     -o "$TMP_DIR/collected-events.json"; then
     if python3 - "$TMP_DIR/collected-events.json" \
       "$PROCESS_CORRELATION_ID" "$DECLINE_CORRELATION_ID" \
-      "$INSUFFICIENT_CORRELATION_ID" <<'PY'
+      "$INSUFFICIENT_CORRELATION_ID" "$SUPPLIER_CORRELATION_ID" \
+      "$TMP_DIR/generator.log" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-path, process_id, decline_id, insufficient_id = sys.argv[1:]
+path, process_id, decline_id, insufficient_id, supplier_id, generator_log = sys.argv[1:]
 payload = json.loads(Path(path).read_text())
 events = [record["event"] for record in payload.get("events", [])]
+attempt_records = []
+summary_records = []
+for line in Path(generator_log).read_text().splitlines():
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if record.get("event") == "order_generator.attempt":
+        attempt_records.append(record)
+    elif record.get("event") == "order_generator.summary":
+        summary_records.append(record)
+assert len(attempt_records) == 3, attempt_records
+assert len(summary_records) == 1, summary_records
+generator_run_id = summary_records[0]["run_id"]
+assert {record["run_id"] for record in attempt_records} == {generator_run_id}
+assert {record["outcome"] for record in attempt_records} == {
+    "processed",
+    "payment_declined",
+    "inventory_rejected",
+}
+
 required = {
     process_id: {
         "order.process.started",
@@ -361,7 +514,37 @@ required = {
         "order.process.failed",
         "inventory.reservation.rejected",
     },
+    supplier_id: {
+        "supplier.product.onboarded",
+        "supplier.replenishment.evaluated",
+        "supplier.purchase_order.ordered",
+        "supplier.purchase_order.received",
+        "inventory.stock.received",
+    },
 }
+for attempt in attempt_records:
+    required[attempt["correlation_id"]] = {
+        "order_generator.attempt",
+        "order.process.started",
+        "order.process.completed"
+        if attempt["outcome"] == "processed"
+        else "order.process.failed",
+    }
+    if attempt["outcome"] == "payment_declined":
+        required[attempt["correlation_id"]].update(
+            {
+                "inventory.reservation.created",
+                "inventory.reservation.released",
+            }
+        )
+    elif attempt["outcome"] == "inventory_rejected":
+        required[attempt["correlation_id"]].add(
+            "inventory.reservation.rejected"
+        )
+    else:
+        required[attempt["correlation_id"]].add(
+            "inventory.reservation.created"
+        )
 for correlation_id, messages in required.items():
     correlated = [
         event for event in events
@@ -371,14 +554,25 @@ for correlation_id, messages in required.items():
     services = {event.get("service") for event in correlated}
     if not messages.issubset(found):
         raise SystemExit(1)
-    if not {"order-api", "inventory-api"}.issubset(services):
+    if correlation_id == supplier_id:
+        required_services = {"supplier-simulator", "inventory-api"}
+    elif correlation_id in {
+        attempt["correlation_id"] for attempt in attempt_records
+    }:
+        required_services = {"order-generator", "order-api", "inventory-api"}
+    else:
+        required_services = {"order-api", "inventory-api"}
+    if not required_services.issubset(services):
         raise SystemExit(1)
     for event in correlated:
-        if event.get("event_name") in messages:
+        if (
+            event.get("event_name") in messages
+            and event.get("service") != "order-generator"
+        ):
             if not event.get("trace_id") or not event.get("span_id"):
                 raise SystemExit(1)
 print(f"    raw events persisted: {len(events)}")
-print("    all three order scenarios found in durable raw event storage")
+print("    order, supplier, and generator events persisted and correlated")
 PY
     then
       COLLECTED=1
@@ -393,10 +587,14 @@ if (( ! COLLECTED )); then
   die "Raw event collector did not persist all expected scenario events"
 fi
 
-echo "SUCCESS: Catalog, inventory, Saga, and observability reproduction passed."
+echo "==> 7/7: Build DuckDB analytics from the collected event stream"
+docker compose --profile analytics run --build --rm analytics
+
+echo "SUCCESS: Catalog, inventory, Saga, supplier, generator, observability, and dbt reproduction passed."
 echo "  Order API:     $ORDER_URL"
 echo "  Inventory API: $INVENTORY_URL"
 echo "  Jaeger UI:     $JAEGER_URL"
+echo "  Supplier API:  $SUPPLIER_URL"
 echo "  Event API:     $EVENT_COLLECTOR_URL"
 echo
 if (( CLEANUP )); then

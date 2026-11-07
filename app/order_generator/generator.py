@@ -9,10 +9,13 @@ import statistics
 import sys
 import time
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from typing import Any, Literal
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
+
+from app.event_publisher import build_event_envelope
 
 Mode = Literal["random", "coverage"]
 
@@ -36,6 +39,7 @@ class GeneratorConfig:
     success_quantity: int = 2
     decline_quantity: int = 11
     insufficient_quantity: int = 999_999
+    event_collector_url: str | None = None
 
     def __post_init__(self) -> None:
         if self.mode not in {"random", "coverage"}:
@@ -56,6 +60,31 @@ class GeneratorConfig:
             raise ValueError("coverage quantities must be positive")
         if not self.order_api_url.startswith(("http://", "https://")):
             raise ValueError("order_api_url must be an HTTP(S) URL")
+        if self.event_collector_url and not self.event_collector_url.startswith(
+            ("http://", "https://")
+        ):
+            raise ValueError("event_collector_url must be an HTTP(S) URL")
+
+    @property
+    def plan_id(self) -> str:
+        if self.mode == "coverage":
+            workload = (
+                f"coverage:{self.success_quantity}:"
+                f"{self.decline_quantity}:{self.insufficient_quantity}"
+            )
+        else:
+            workload = (
+                f"random:{self.count}:{self.min_quantity}:{self.max_quantity}"
+            )
+        return str(
+            uuid5(
+                NAMESPACE_URL,
+                (
+                    f"order-generator-plan:{workload}:{self.seed}:"
+                    f"{self.product_id}:{self.first_order_id}"
+                ),
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -81,23 +110,29 @@ class OrderAttempt:
     latency_ms: float
     response: dict[str, Any] | None = None
     error: str | None = None
+    attempted_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
-def _correlation_id(config: GeneratorConfig, index: int) -> str:
+def _correlation_id(
+    config: GeneratorConfig, index: int, execution_id: str | None = None
+) -> str:
+    namespace = execution_id or config.plan_id
     return str(
         uuid5(
             NAMESPACE_URL,
             (
-                f"order-generator:{config.mode}:{config.seed}:"
+                f"order-generator:{namespace}:{config.mode}:{config.seed}:"
                 f"{config.product_id}:{config.first_order_id}:{index}"
             ),
         )
     )
 
-def build_plan(config: GeneratorConfig) -> list[OrderCommand]:
+def build_plan(
+    config: GeneratorConfig, *, execution_id: str | None = None
+) -> list[OrderCommand]:
     """Build a repeatable request plan from the seed and run configuration."""
     rng = random.Random(config.seed)
 
@@ -112,7 +147,7 @@ def build_plan(config: GeneratorConfig) -> list[OrderCommand]:
                 order_id=config.first_order_id + index,
                 product_id=config.product_id,
                 quantity=quantity,
-                correlation_id=_correlation_id(config, index),
+                correlation_id=_correlation_id(config, index, execution_id),
                 scenario=scenario,
                 expected_outcome=COVERAGE_EXPECTATIONS[scenario],
             )
@@ -124,7 +159,7 @@ def build_plan(config: GeneratorConfig) -> list[OrderCommand]:
             order_id=config.first_order_id + index,
             product_id=config.product_id,
             quantity=rng.randint(config.min_quantity, config.max_quantity),
-            correlation_id=_correlation_id(config, index),
+            correlation_id=_correlation_id(config, index, execution_id),
             scenario="random",
         )
         for index in range(config.count)
@@ -161,6 +196,7 @@ async def execute_plan(
 
     for command in plan:
         started_at = time.perf_counter()
+        attempted_at = datetime.now(UTC).isoformat()
         try:
             response = await client.post(
                 f"/orders/{command.order_id}/process",
@@ -185,6 +221,7 @@ async def execute_plan(
                     http_status=response.status_code,
                     latency_ms=round(elapsed_ms, 3),
                     response=payload,
+                    attempted_at=attempted_at,
                     error=(
                         "Response body was not a JSON object"
                         if payload is None
@@ -206,6 +243,7 @@ async def execute_plan(
                     http_status=None,
                     latency_ms=round(elapsed_ms, 3),
                     error=f"{type(exc).__name__}: {exc}",
+                    attempted_at=attempted_at,
                 )
             )
 
@@ -268,6 +306,7 @@ def summarize(
     )
     return {
         "event": "order_generator.summary",
+        "plan_id": config.plan_id,
         "mode": config.mode,
         "seed": config.seed,
         "product_id": config.product_id,
@@ -286,16 +325,96 @@ def summarize(
     }
 
 
+def build_generator_events(
+    config: GeneratorConfig,
+    attempts: list[OrderAttempt],
+    summary: dict[str, Any],
+    *,
+    run_id: str,
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for attempt in attempts:
+        source = {
+            "timestamp": attempt.attempted_at or datetime.now(UTC).isoformat(),
+            "level": "INFO",
+            "service": "order-generator",
+            "logger": "app.order_generator",
+            "message": "order_generator.attempt",
+            "correlation_id": attempt.correlation_id,
+            "trace_id": None,
+            "span_id": None,
+            "attributes": {
+                **attempt.to_dict(),
+                "run_id": run_id,
+                "plan_id": config.plan_id,
+                "mode": config.mode,
+                "seed": config.seed,
+            },
+        }
+        events.append(build_event_envelope(source))
+
+    summary_source = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "level": "INFO",
+        "service": "order-generator",
+        "logger": "app.order_generator",
+        "message": "order_generator.summary",
+        "correlation_id": None,
+        "trace_id": None,
+        "span_id": None,
+        "attributes": {
+            **summary,
+            "run_id": run_id,
+            "plan_id": config.plan_id,
+        },
+    }
+    events.append(build_event_envelope(summary_source))
+    return events
+
+
+async def publish_generator_events(
+    client: httpx.AsyncClient,
+    events: list[dict[str, Any]],
+) -> dict[str, int]:
+    accepted = 0
+    duplicates = 0
+    for start in range(0, len(events), 500):
+        batch = events[start : start + 500]
+        for attempt in range(3):
+            try:
+                response = await client.post("/v1/events", json={"events": batch})
+                response.raise_for_status()
+                result = response.json()
+                if result.get("quarantined", 0) or result.get("conflicts", 0):
+                    raise ValueError("Collector quarantined generated events")
+                accepted += result.get("accepted", 0)
+                duplicates += result.get("duplicates", 0)
+                break
+            except (httpx.HTTPError, ValueError) as exc:
+                if attempt == 2:
+                    raise RuntimeError(
+                        f"Could not publish generator event batch: {exc}"
+                    ) from exc
+                await asyncio.sleep(0.1 * (2**attempt))
+    return {"accepted": accepted, "duplicates": duplicates}
+
+
 def emit_events(
     config: GeneratorConfig,
     plan: list[OrderCommand],
     attempts: list[OrderAttempt],
+    summary: dict[str, Any] | None = None,
+    *,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
+    effective_run_id = run_id or config.plan_id
     for attempt in attempts:
         print(
             json.dumps(
                 {
                     "event": "order_generator.attempt",
+                    "run_id": effective_run_id,
+                    "plan_id": config.plan_id,
                     "mode": config.mode,
                     "seed": config.seed,
                     **attempt.to_dict(),
@@ -303,19 +422,48 @@ def emit_events(
                 sort_keys=True,
             )
         )
-    summary = summarize(config, plan, attempts)
-    print(json.dumps(summary, sort_keys=True))
-    return summary
+    result = summary if summary is not None else summarize(config, plan, attempts)
+    result.setdefault("run_id", effective_run_id)
+    print(json.dumps(result, sort_keys=True))
+    return result
 
 
 async def run(config: GeneratorConfig) -> dict[str, Any]:
-    plan = build_plan(config)
+    run_id = str(uuid4())
+    plan = build_plan(config, execution_id=run_id)
     async with httpx.AsyncClient(
         base_url=config.order_api_url.rstrip("/"),
         timeout=httpx.Timeout(10.0, connect=3.0),
     ) as client:
         attempts = await execute_plan(client, plan)
-    return emit_events(config, plan, attempts)
+
+    summary = summarize(config, plan, attempts)
+    summary["run_id"] = run_id
+    if config.event_collector_url:
+        events = build_generator_events(
+            config, attempts, summary, run_id=run_id
+        )
+        try:
+            async with httpx.AsyncClient(
+                base_url=config.event_collector_url.rstrip("/"),
+                timeout=httpx.Timeout(5.0, connect=2.0),
+            ) as collector:
+                delivery = await publish_generator_events(collector, events)
+            summary["collector_delivery"] = {
+                "status": "delivered",
+                "event_count": len(events),
+                **delivery,
+            }
+        except (httpx.HTTPError, RuntimeError) as exc:
+            summary["collector_delivery"] = {
+                "status": "failed",
+                "event_count": len(events),
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            summary["exit_code"] = 1
+    return emit_events(
+        config, plan, attempts, summary, run_id=run_id
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -325,6 +473,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--order-api-url",
         default=os.getenv("ORDER_API_URL", "http://localhost:18000"),
+    )
+    parser.add_argument(
+        "--event-collector-url",
+        default=os.getenv("EVENT_COLLECTOR_URL"),
     )
     parser.add_argument(
         "--mode",
@@ -394,6 +546,7 @@ def main(argv: list[str] | None = None) -> int:
             success_quantity=args.success_quantity,
             decline_quantity=args.decline_quantity,
             insufficient_quantity=args.insufficient_quantity,
+            event_collector_url=args.event_collector_url,
         )
         summary = asyncio.run(run(config))
     except (ValueError, httpx.InvalidURL) as exc:

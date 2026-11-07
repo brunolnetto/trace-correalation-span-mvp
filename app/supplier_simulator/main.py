@@ -143,6 +143,19 @@ async def evaluate_replenishment(
                 "purchase_order_id": (
                     decision.get("purchase_order", {}).get("purchase_order_id")
                 ),
+                "quantity": decision.get("purchase_order", {}).get("quantity"),
+                "reorder_point": decision.get(
+                    "purchase_order", {}
+                ).get("reorder_point"),
+                "target_stock": decision.get(
+                    "purchase_order", {}
+                ).get("target_stock"),
+                "lead_time_seconds": decision.get(
+                    "purchase_order", {}
+                ).get("lead_time_seconds"),
+                "policy_version": decision.get(
+                    "purchase_order", {}
+                ).get("policy_version"),
             },
         )
     return {"decisions": decisions}
@@ -171,7 +184,9 @@ async def order_purchase_order(purchase_order_id: str):
     try:
         result = await simulation.order_purchase_order(purchase_order_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail="Purchase order not found.") from None
+        raise HTTPException(
+            status_code=404, detail="Purchase order not found."
+        ) from None
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
 
@@ -179,7 +194,11 @@ async def order_purchase_order(purchase_order_id: str):
         "supplier.purchase_order.ordered",
         extra={
             "purchase_order_id": purchase_order_id,
+            "product_id": result["product_id"],
+            "quantity": result["quantity"],
+            "status": result["status"],
             "due_at": result["due_at"],
+            "lead_time_seconds": result["lead_time_seconds"],
         },
     )
     return result
@@ -196,7 +215,9 @@ async def receive_purchase_order(purchase_order_id: str):
                 purchase_order_id, client, correlation_id()
             )
     except KeyError:
-        raise HTTPException(status_code=404, detail="Purchase order not found.") from None
+        raise HTTPException(
+            status_code=404, detail="Purchase order not found."
+        ) from None
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     except httpx.HTTPError as exc:
@@ -208,6 +229,9 @@ async def receive_purchase_order(purchase_order_id: str):
             "purchase_order_id": purchase_order_id,
             "product_id": result["product_id"],
             "quantity": result["quantity"],
+            "status": result["status"],
+            "due_at": result["due_at"],
+            "received_at": result["received_at"],
             "receipt_id": result["receipt_id"],
         },
     )
@@ -222,13 +246,20 @@ async def cancel_purchase_order(purchase_order_id: str):
     try:
         result = await simulation.cancel_purchase_order(purchase_order_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail="Purchase order not found.") from None
+        raise HTTPException(
+            status_code=404, detail="Purchase order not found."
+        ) from None
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
 
     logger.info(
         "supplier.purchase_order.cancelled",
-        extra={"purchase_order_id": purchase_order_id},
+        extra={
+            "purchase_order_id": purchase_order_id,
+            "product_id": result["product_id"],
+            "quantity": result["quantity"],
+            "status": result["status"],
+        },
     )
     return result
 
