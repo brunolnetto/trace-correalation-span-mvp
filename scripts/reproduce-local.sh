@@ -61,7 +61,7 @@ if (( CLEANUP )); then
   trap 'docker compose down --remove-orphans || true; cleanup_tmp' EXIT
 fi
 
-echo "==> 1/6: Resolve and install Python dependencies"
+echo "==> 1/7: Resolve and install Python dependencies"
 uv lock --python 3.12
 uv sync --python 3.12 --all-groups --locked
 [[ -f uv.lock ]] || die "uv did not create uv.lock"
@@ -69,13 +69,13 @@ if ! git ls-files --error-unmatch uv.lock >/dev/null 2>&1; then
   echo "NOTE: uv.lock is generated locally but is not committed. Review and commit it for repeatable installs."
 fi
 
-echo "==> 2/6: Run unit and concurrency tests"
+echo "==> 2/7: Run unit and concurrency tests"
 uv run --python 3.12 pytest
 
-echo "==> 3/6: Run Ruff"
+echo "==> 3/7: Run Ruff"
 uv run --python 3.12 ruff check .
 
-echo "==> 4/6: Build and start Jaeger, APIs, supplier, and event collector"
+echo "==> 4/7: Build and start Jaeger, APIs, supplier, and event collector"
 docker compose down --remove-orphans
 docker compose up --build --detach
 
@@ -102,7 +102,7 @@ wait_for_url "$JAEGER_URL/" "Jaeger UI"
 wait_for_url "$EVENT_COLLECTOR_URL/healthz" "event-collector"
 wait_for_url "$SUPPLIER_URL/healthz" "supplier-simulator"
 
-echo "==> 5/6: Exercise catalog, orders, and supplier replenishment"
+echo "==> 5/7: Exercise catalog, orders, and supplier replenishment"
 curl --silent --show-error --fail \
   --header "Content-Type: application/json" \
   --data '{"sku":"LOW-STOCK-001","name":"Low stock demo product","category":"demo","unit_price":"10.00"}' \
@@ -327,7 +327,7 @@ docker compose --profile simulation run --build --rm order-generator \
   python -m app.order_generator --mode coverage \
   > "$TMP_DIR/generator.log"
 
-echo "==> 6/6: Verify JSON logs, Saga traces, and raw event collection"
+echo "==> 6/7: Verify JSON logs, Saga traces, and raw event collection"
 TRACE_URL="$JAEGER_URL/api/traces?service=order-api&limit=50&lookback=1h"
 TRACE_FOUND=0
 deadline=$((SECONDS + WAIT_SECONDS))
