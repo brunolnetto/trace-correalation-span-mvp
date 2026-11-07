@@ -2,10 +2,10 @@ FROM python:3.12-slim
 
 WORKDIR /workspace
 
-COPY requirements.txt ./
+COPY analytics/requirements.txt ./
 RUN python -m pip install --no-cache-dir --disable-pip-version-check -r requirements.txt
 
-COPY . .
+COPY analytics/ ./
 
 ENV DBT_PROFILES_DIR=/workspace
 
