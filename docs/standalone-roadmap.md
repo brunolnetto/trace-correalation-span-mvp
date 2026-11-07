@@ -61,10 +61,13 @@ Analytics Runner must depend on Simulation Runner with `service_completed_succes
 **Target invocation:**
 
 ```bash
-docker compose --profile standalone up --build \
-  --abort-on-container-exit \
-  --exit-code-from analytics-runner
+bash scripts/run-standalone.sh
 ```
+
+The wrapper starts Compose detached, waits for the Simulation Runner to exit,
+checks its actual container status, then waits for Analytics Runner and returns
+that job's exit code. It deliberately avoids `--abort-on-container-exit`,
+which would stop dependencies when the Simulation Runner exits.
 
 **Exit condition:** Compose configuration is valid, finite sidecars terminate, the analytics job's status is returned to the caller, and service-only/manual execution remains available.
 
@@ -72,7 +75,7 @@ docker compose --profile standalone up --build \
 
 **[#17 — Add standalone end-to-end verification and user documentation](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/17)**
 
-Run the complete scenario from a clean Compose state. Verify inventory and PO invariants, Collector event coverage, dbt success, and failure propagation. Update README with invocation, prerequisites, configuration, report locations, cleanup, and known limitations.
+Run the complete scenario from a clean Compose state. Verify inventory and PO invariants, Collector event coverage, dbt success, and failure propagation. Add `scripts/test-standalone-failure-paths.sh` to verify that a failed simulation blocks analytics and a failed dbt executable propagates a non-zero result. Update README with invocation, prerequisites, configuration, report locations, cleanup, and known limitations.
 
 **Exit condition:** one reproducible command validates the entire path locally, reports are inspectable, and the existing `scripts/reproduce-local.sh` workflow remains functional.
 

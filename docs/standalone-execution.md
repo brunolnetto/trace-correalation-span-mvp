@@ -124,13 +124,21 @@ for scenario completion.
 Run the complete standalone lifecycle with:
 
 ```bash
-docker compose --profile standalone up --build \
-  --abort-on-container-exit \
-  --exit-code-from analytics-runner
+bash scripts/run-standalone.sh
 ```
 
-The command returns the Analytics Runner's exit status. The finite Simulation
-Runner completes first; only then does Compose start the Analytics Runner.
+The host-side wrapper starts the profile in detached mode, waits for the
+Simulation Runner, checks its container exit code, then waits for the Analytics
+Runner and returns its exit code. Analytics still depends on the Simulation
+Runner through Compose's `service_completed_successfully` condition.
+
+Do not add `--abort-on-container-exit` or `--exit-code-from` to this workflow.
+Those options stop the dependency services when the Simulation Runner exits,
+which can kill the Analytics Runner before its dbt build completes.
+
+By default, the wrapper removes containers and the network after completion
+but preserves named volumes. Set `STANDALONE_KEEP_STACK=1` to leave the stack
+for inspection, or `STANDALONE_BUILD=0` to skip image builds.
 
 ## Non-goals
 
@@ -144,20 +152,32 @@ Runner completes first; only then does Compose start the Analytics Runner.
 
 ## Local execution
 
-For a clean run, remove previous Compose containers and named volumes first.
-**This deletes raw-event data, analytics data, reports, and all other named-volume
-data:**
+For a clean standalone execution, the wrapper removes previous containers
+after each run. It does not delete named volumes:
 
 ```bash
-docker compose down -v
-docker compose --profile standalone up --build \
-  --abort-on-container-exit \
-  --exit-code-from analytics-runner
+bash scripts/run-standalone.sh
 ```
+
+To exercise failure propagation, run:
+
+```bash
+bash scripts/test-standalone-failure-paths.sh
+```
+
+The failure-path check intentionally injects a Simulation Runner failure and
+a failing `dbt` executable through temporary Compose overrides. It verifies
+that analytics is not started after simulation failure and that the Analytics
+Runner persists a failed run report and exits non-zero after dbt failure.
+It leaves named volumes intact.
+
+Only remove named volumes when you intentionally want to erase raw events,
+simulation/analytics reports, and DuckDB data:
 
 The Simulation Runner writes `simulation-report.json` to the `run-state` volume.
 The Analytics Runner writes `run-report.json` and dbt artifacts to
-`analytics-data`. The default scenario uses product 7, 42 opening units, eight
+`analytics-data`. Both reports remain available after the wrapper removes
+containers because the named volumes are preserved. The default scenario uses product 7, 42 opening units, eight
 initial two-unit orders, one 34-unit purchase order, four more two-unit orders
 during lead time, and a final inventory position of 52 after receipt.
 
@@ -170,4 +190,7 @@ does not yet provide durable order-request idempotency.
 
 The Simulation Runner waits for the correlation-scoped Collector completion
 barrier before reporting success. Compose starts the Analytics Runner only after
-the simulation exits successfully.
+the simulation exits successfully. The host wrapper waits for each finite
+container separately, checks the actual exit code from `docker compose ps
+--all --format json`, and only then removes the containers. It never uses
+`--abort-on-container-exit` for this dependency chain.
