@@ -66,7 +66,7 @@ class GeneratorConfig:
             raise ValueError("event_collector_url must be an HTTP(S) URL")
 
     @property
-    def run_id(self) -> str:
+    def plan_id(self) -> str:
         return str(
             uuid5(
                 NAMESPACE_URL,
@@ -112,7 +112,7 @@ class OrderAttempt:
 def _correlation_id(
     config: GeneratorConfig, index: int, execution_id: str | None = None
 ) -> str:
-    namespace = execution_id or config.run_id
+    namespace = execution_id or config.plan_id
     return str(
         uuid5(
             NAMESPACE_URL,
@@ -296,7 +296,7 @@ def summarize(
     )
     return {
         "event": "order_generator.summary",
-        "run_id": config.run_id,
+        "plan_id": config.plan_id,
         "mode": config.mode,
         "seed": config.seed,
         "product_id": config.product_id,
@@ -392,7 +392,7 @@ def emit_events(
     *,
     run_id: str | None = None,
 ) -> dict[str, Any]:
-    effective_run_id = run_id or config.run_id
+    effective_run_id = run_id or config.plan_id
     for attempt in attempts:
         print(
             json.dumps(
