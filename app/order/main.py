@@ -32,6 +32,22 @@ INVENTORY_API_URL = os.getenv(
 )
 
 
+def classify_order_failure(exc: Exception) -> str:
+    if isinstance(exc, PaymentDeclined):
+        return "payment_declined"
+    if isinstance(exc, httpx.HTTPStatusError):
+        if exc.response.status_code == 404:
+            return "product_not_found"
+        if exc.response.status_code == 409:
+            return "inventory_rejected"
+        return "inventory_service_error"
+    if isinstance(exc, httpx.HTTPError):
+        return "inventory_unavailable"
+    if isinstance(exc, TimeoutError):
+        return "timeout"
+    return "processing_error"
+
+
 @app.get("/healthz", tags=["health"])
 async def healthcheck():
     return {"status": "ok", "service": "order-api"}
@@ -132,12 +148,14 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
         )
     except Exception as exc:
         incomplete_compensations = compensation_tracker.incomplete_steps
+        failure_category = classify_order_failure(exc)
         logger.exception(
             "order.process.failed",
             extra={
                 "order_id": order_id,
                 "saga_id": saga_id,
                 "incomplete_compensations": incomplete_compensations,
+                "failure_category": failure_category,
             },
         )
 
