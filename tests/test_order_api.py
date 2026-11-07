@@ -119,6 +119,8 @@ async def test_process_order_returns_saga_result_and_correlation_id(monkeypatch)
     assert body["saga_id"]
     assert body["reservation_id"] == "reservation-api-test"
     assert body["payment_id"]
+    assert body["unit_price"] == "99.90"
+    assert body["total_amount"] == "199.80"
     assert [request.method for request in requests] == ["GET", "POST"]
     assert requests[0].headers["X-Correlation-ID"] == correlation_id
 
@@ -153,7 +155,7 @@ async def test_failed_compensation_returns_reconciliation_details(monkeypatch):
         "Order processing failed and compensation is incomplete."
     )
     assert detail["incomplete_compensations"] == ["reserve_inventory"]
-    assert [request.method for request in requests] == ["POST", "DELETE"]
+    assert [request.method for request in requests] == ["GET", "POST", "DELETE"]
 
 
 @pytest.mark.asyncio
