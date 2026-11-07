@@ -57,7 +57,7 @@ def install_inventory_mock(
                 json={
                     "product_id": 7,
                     "sku": "DEMO-007",
-                    "unit_price": "99.90",
+                    "unit_price": 99.9,
                     "is_active": not product_inactive,
                 },
             )
