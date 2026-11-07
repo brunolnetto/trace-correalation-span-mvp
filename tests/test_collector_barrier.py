@@ -40,7 +40,11 @@ def test_assessment_requires_every_pair_and_ignores_duplicates_and_other_runs():
     records.extend(
         [
             records[0],
-            _record("unrelated-event", "order-from-previous-run", "order.process.completed"),
+            _record(
+                "unrelated-event",
+                "order-from-previous-run",
+                "order.process.completed",
+            ),
             _record("unrelated-name", "order-current", "inventory.lookup.completed"),
         ]
     )
