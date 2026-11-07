@@ -2,7 +2,7 @@
 #
 # Reproduce the catalog, order, supplier, raw-event and observability flow:
 # uv tests/lint -> start services -> order scenarios -> supplier replenishment ->
-# generator coverage -> Jaeger, JSON log and raw-event verification.
+# generator coverage -> Jaeger/log/raw-event verification -> dbt build.
 #
 # Usage:
 #   ./scripts/reproduce-local.sh
@@ -550,7 +550,10 @@ if (( ! COLLECTED )); then
   die "Raw event collector did not persist all expected scenario events"
 fi
 
-echo "SUCCESS: Catalog, inventory, Saga, supplier, generator, and observability reproduction passed."
+echo "==> 7/7: Build DuckDB analytics from the collected event stream"
+docker compose --profile analytics run --build --rm analytics
+
+echo "SUCCESS: Catalog, inventory, Saga, supplier, generator, observability, and dbt reproduction passed."
 echo "  Order API:     $ORDER_URL"
 echo "  Inventory API: $INVENTORY_URL"
 echo "  Jaeger UI:     $JAEGER_URL"
