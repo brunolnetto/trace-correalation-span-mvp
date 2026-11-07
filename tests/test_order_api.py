@@ -43,6 +43,7 @@ def install_inventory_mock(
     fail_release=False,
     reject_reservation=False,
     product_not_found=False,
+    product_inactive=False,
 ):
     requests: list[httpx.Request] = []
 
@@ -57,7 +58,7 @@ def install_inventory_mock(
                     "product_id": 7,
                     "sku": "DEMO-007",
                     "unit_price": "99.90",
-                    "is_active": True,
+                    "is_active": not product_inactive,
                 },
             )
         if request.method == "POST":
@@ -168,6 +169,20 @@ async def test_inventory_conflict_returns_409_without_charging_payment(monkeypat
 
     assert response.status_code == 409
     assert [request.method for request in requests] == ["GET", "POST"]
+    assert workflow._orders == {}
+
+
+@pytest.mark.asyncio
+async def test_inactive_product_returns_409_without_reserving_stock(monkeypatch):
+    requests = install_inventory_mock(monkeypatch, product_inactive=True)
+
+    response = await post_order(
+        "550e8400-e29b-41d4-a716-446655440306"
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Product is inactive."
+    assert [request.method for request in requests] == ["GET"]
     assert workflow._orders == {}
 
 
