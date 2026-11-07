@@ -63,9 +63,10 @@ class RunnerConfig:
             self.order_quantity,
             self.first_batch_count,
             self.second_batch_count,
-            self.lead_time_seconds,
         ) < 1:
             raise ValueError("scenario quantities and counts must be positive")
+        if self.lead_time_seconds < 0:
+            raise ValueError("lead_time_seconds must be non-negative")
         if self.reorder_point < 0:
             raise ValueError("reorder_point must be non-negative")
         if self.target_stock <= self.reorder_point:
@@ -767,21 +768,79 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run the deterministic order and supplier replenishment scenario."
     )
-    parser.add_argument("--order-api-url", default=os.getenv("ORDER_API_URL", "http://order-api:8000"))
-    parser.add_argument("--inventory-api-url", default=os.getenv("INVENTORY_API_URL", "http://inventory-api:8001"))
-    parser.add_argument("--supplier-api-url", default=os.getenv("SUPPLIER_API_URL", "http://supplier-simulator:8002"))
-    parser.add_argument("--event-collector-url", default=os.getenv("EVENT_COLLECTOR_URL", "http://event-collector:8010"))
-    parser.add_argument("--product-id", type=int, default=int(os.getenv("SIMULATION_PRODUCT_ID", "7")))
-    parser.add_argument("--opening-stock", type=int, default=int(os.getenv("SIMULATION_OPENING_STOCK", "42")))
-    parser.add_argument("--reorder-point", type=int, default=int(os.getenv("SIMULATION_REORDER_POINT", "30")))
-    parser.add_argument("--target-stock", type=int, default=int(os.getenv("SIMULATION_TARGET_STOCK", "60")))
-    parser.add_argument("--lead-time-seconds", type=int, default=int(os.getenv("SIMULATION_LEAD_TIME_SECONDS", "3600")))
-    parser.add_argument("--first-batch-count", type=int, default=int(os.getenv("SIMULATION_FIRST_BATCH_COUNT", "8")))
-    parser.add_argument("--second-batch-count", type=int, default=int(os.getenv("SIMULATION_SECOND_BATCH_COUNT", "4")))
-    parser.add_argument("--order-quantity", type=int, default=int(os.getenv("SIMULATION_ORDER_QUANTITY", "2")))
-    parser.add_argument("--seed", type=int, default=int(os.getenv("SIMULATION_SEED", "20261107")))
-    parser.add_argument("--request-timeout-seconds", type=float, default=float(os.getenv("SIMULATION_REQUEST_TIMEOUT_SECONDS", "10")))
-    parser.add_argument("--report-path", default=os.getenv("SIMULATION_REPORT_PATH", "/run-state/simulation-report.json"))
+    parser.add_argument(
+        "--order-api-url",
+        default=os.getenv("ORDER_API_URL", "http://order-api:8000"),
+    )
+    parser.add_argument(
+        "--inventory-api-url",
+        default=os.getenv("INVENTORY_API_URL", "http://inventory-api:8001"),
+    )
+    parser.add_argument(
+        "--supplier-api-url",
+        default=os.getenv("SUPPLIER_API_URL", "http://supplier-simulator:8002"),
+    )
+    parser.add_argument(
+        "--event-collector-url",
+        default=os.getenv("EVENT_COLLECTOR_URL", "http://event-collector:8010"),
+    )
+    parser.add_argument(
+        "--product-id",
+        type=int,
+        default=int(os.getenv("SIMULATION_PRODUCT_ID", "7")),
+    )
+    parser.add_argument(
+        "--opening-stock",
+        type=int,
+        default=int(os.getenv("SIMULATION_OPENING_STOCK", "42")),
+    )
+    parser.add_argument(
+        "--reorder-point",
+        type=int,
+        default=int(os.getenv("SIMULATION_REORDER_POINT", "30")),
+    )
+    parser.add_argument(
+        "--target-stock",
+        type=int,
+        default=int(os.getenv("SIMULATION_TARGET_STOCK", "60")),
+    )
+    parser.add_argument(
+        "--lead-time-seconds",
+        type=int,
+        default=int(os.getenv("SIMULATION_LEAD_TIME_SECONDS", "3600")),
+    )
+    parser.add_argument(
+        "--first-batch-count",
+        type=int,
+        default=int(os.getenv("SIMULATION_FIRST_BATCH_COUNT", "8")),
+    )
+    parser.add_argument(
+        "--second-batch-count",
+        type=int,
+        default=int(os.getenv("SIMULATION_SECOND_BATCH_COUNT", "4")),
+    )
+    parser.add_argument(
+        "--order-quantity",
+        type=int,
+        default=int(os.getenv("SIMULATION_ORDER_QUANTITY", "2")),
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=int(os.getenv("SIMULATION_SEED", "20261107")),
+    )
+    parser.add_argument(
+        "--request-timeout-seconds",
+        type=float,
+        default=float(os.getenv("SIMULATION_REQUEST_TIMEOUT_SECONDS", "10")),
+    )
+    parser.add_argument(
+        "--report-path",
+        default=os.getenv(
+            "SIMULATION_REPORT_PATH",
+            "/run-state/simulation-report.json",
+        ),
+    )
     parser.add_argument("--run-id", default=os.getenv("STANDALONE_RUN_ID"))
     return parser
 
