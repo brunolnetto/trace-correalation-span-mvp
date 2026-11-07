@@ -63,10 +63,42 @@ the Event Collector before it exits successfully. The Collector fsyncs accepted 
 before acknowledging ingestion, so observing every expected correlation/event pair
 provides a durable persistence barrier for this finite scenario.
 
-The barrier must cover:
-- each generator attempt and its corresponding Order API and Inventory API events;
-- the Supplier Simulator's policy, replenishment, PO ordering and PO receipt events;
-- the Inventory API stock receipt event.
+The required event contract is derived from the current producer log messages:
+
+| Correlation scope | Required event name | Count |
+|---|---|---:|
+| Each order correlation ID | `order_generator.attempt` | 1 |
+| Each order correlation ID | `order.process.started` | 1 |
+| Each order correlation ID | `order.process.completed` | 1 |
+| Each order correlation ID | `inventory.reservation.created` | 1 |
+| Each order correlation ID | `inventory.reservation.committed` | 1 |
+| Supplier correlation ID | `supplier.reorder_policy.updated` | 1 |
+| Supplier correlation ID | `supplier.replenishment.evaluated` | 3 |
+| Supplier correlation ID | `supplier.purchase_order.ordered` | 1 |
+| Supplier correlation ID | `supplier.purchase_order.received` | 1 |
+| Supplier correlation ID | `inventory.stock.received` | 1 |
+
+There is no separate `supplier.purchase_order.created` log event in the current
+producer. Creation is represented by the first
+`supplier.replenishment.evaluated` event with decision
+`purchase_order_created` and its purchase-order ID. The three replenishment
+events correspond to the initial decision, the in-flight duplicate-suppression
+decision, and the post-receipt decision.
+
+For the default 12-order scenario, the barrier requires 67 unique event records:
+five per order correlation ID and seven under the supplier correlation ID.
+It ignores events from other correlation IDs and counts each persisted event ID
+once, so replayed/duplicated delivery cannot satisfy a missing pair. It polls
+`GET /v1/events?limit=10000`; the Collector's persist-before-ack contract means
+visibility through this read API is the durability boundary.
+
+Polling uses bounded exponential backoff. Defaults are a 30-second timeout,
+100 ms initial backoff and 2-second maximum backoff. Override them with
+`SIMULATION_COLLECTOR_BARRIER_TIMEOUT_SECONDS`,
+`SIMULATION_COLLECTOR_POLL_INITIAL_BACKOFF_SECONDS`, and
+`SIMULATION_COLLECTOR_POLL_MAX_BACKOFF_SECONDS`. A timeout records the missing
+correlation ID/event-name/count tuples in the simulation report and exits
+non-zero; it never reports simulation success.
 
 The Analytics Runner depends on successful completion of the Simulation Runner. It
 must not infer completion from container startup order, a fixed sleep, or a healthy
@@ -113,4 +145,4 @@ The Simulation Runner writes `simulation-report.json` to the `run-state` volume.
 
 The runner validates the opening balance and rejects a run if the product has pre-existing reservations or an active purchase order. Each run gets a distinct run ID, order IDs, order correlation IDs, and one separate supplier correlation ID. Set `STANDALONE_RUN_ID` only when an explicitly controlled identifier is required; do not reuse it to rerun a scenario because the Order API in this MVP does not yet provide durable order-request idempotency.
 
-This is an intermediate milestone, not the final standalone command. The Collector completion barrier is tracked separately in [issue #14](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/14), and the finite Analytics Runner is tracked in [issue #15](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/15). The current runner publishes generator-attempt events to the Collector, but successful completion does not yet prove that all asynchronous service log events have been durably collected.
+The Simulation Runner now waits for the correlation-scoped Collector completion barrier described above before reporting success. The finite Analytics Runner remains tracked in [issue #15](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/15); this is still an intermediate milestone, not the final standalone command.
