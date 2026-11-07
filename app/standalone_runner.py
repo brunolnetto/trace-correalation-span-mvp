@@ -84,8 +84,13 @@ class RunnerConfig:
             raise ValueError("collector_barrier_timeout_seconds must be positive")
         if self.collector_poll_initial_backoff_seconds <= 0:
             raise ValueError("collector_poll_initial_backoff_seconds must be positive")
-        if self.collector_poll_max_backoff_seconds < self.collector_poll_initial_backoff_seconds:
-            raise ValueError("collector_poll_max_backoff_seconds must be at least the initial backoff")
+        if (
+            self.collector_poll_max_backoff_seconds
+            < self.collector_poll_initial_backoff_seconds
+        ):
+            raise ValueError(
+                "collector_poll_max_backoff_seconds must be at least the initial backoff"
+            )
         if not self.report_path:
             raise ValueError("report_path must not be empty")
 
@@ -662,7 +667,9 @@ async def run_scenario(
                 received_po.get("quantity"),
             )
             if not received_po.get("receipt_id"):
-                raise ScenarioError("Received purchase order has no Inventory receipt ID")
+                raise ScenarioError(
+                    "Received purchase order has no Inventory receipt ID"
+                )
             report["purchase_order"].update(
                 {
                     "status": received_po["status"],
@@ -886,7 +893,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--collector-poll-initial-backoff-seconds",
         type=float,
-        default=float(os.getenv("SIMULATION_COLLECTOR_POLL_INITIAL_BACKOFF_SECONDS", "0.1")),
+        default=float(
+            os.getenv("SIMULATION_COLLECTOR_POLL_INITIAL_BACKOFF_SECONDS", "0.1")
+        ),
     )
     parser.add_argument(
         "--collector-poll-max-backoff-seconds",
@@ -923,7 +932,9 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
             request_timeout_seconds=args.request_timeout_seconds,
             collector_barrier_timeout_seconds=args.collector_barrier_timeout_seconds,
-            collector_poll_initial_backoff_seconds=args.collector_poll_initial_backoff_seconds,
+            collector_poll_initial_backoff_seconds=(
+                args.collector_poll_initial_backoff_seconds
+            ),
             collector_poll_max_backoff_seconds=args.collector_poll_max_backoff_seconds,
             report_path=args.report_path,
             run_id=args.run_id,
