@@ -46,13 +46,14 @@ def ingest_events(request: EventBatchRequest):
             event = RawEvent.model_validate(payload)
         except ValidationError as exc:
             errors = exc.errors(include_url=False)
+            reason = str(errors)
             store.quarantine(
                 {"batch_index": index, "payload": payload},
-                json_errors := str(errors),
+                reason,
             )
             quarantined += 1
             quarantine_results.append(
-                {"batch_index": index, "reason": json_errors}
+                {"batch_index": index, "reason": reason}
             )
             continue
         valid.append(event)
