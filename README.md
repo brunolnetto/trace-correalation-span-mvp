@@ -103,10 +103,10 @@ DELETE /inventory/reservations/{reservation_id}
 POST   /inventory/reservations/{reservation_id}/commit
 ```
 
-Receipts require an `idempotency_key`; replaying the same key and payload
-does not add stock twice. Reusing the key with a different payload is
-rejected. Adjustments require a reason and cannot reduce physical stock below
-the already reserved quantity. Inactive products cannot receive new
+Receipts and adjustments require an `idempotency_key`; replaying the same
+key and payload does not apply the movement twice. Reusing the key with a
+different payload is rejected. Adjustments require a reason and cannot reduce
+physical stock below the already reserved quantity. Inactive products cannot receive new
 reservations, although their existing stock remains visible.
 
 The movement endpoint exposes the in-memory ledger for receipts, adjustments,
