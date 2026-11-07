@@ -118,7 +118,7 @@ async def test_reservation_release_and_commit_keep_balances_consistent():
     assert repeated == reservation
 
     snapshot = await store.inventory_snapshot(product_id)
-    assert (snapshot["on_hand"], snapshot["reserved"], snapshot["available"]) == (
+    assert (snapshot["on_hand"], snapshot["reserved"], snapshot["available_quantity"]) == (
         42,
         5,
         37,
@@ -126,7 +126,7 @@ async def test_reservation_release_and_commit_keep_balances_consistent():
 
     released = await store.release(reservation["reservation_id"])
     assert released["status"] == "released"
-    assert (await store.inventory_snapshot(product_id))["available"] == 42
+    assert (await store.inventory_snapshot(product_id))["available_quantity"] == 42
     assert (await store.release(reservation["reservation_id"]))["status"] == "released"
 
     with pytest.raises(ValueError, match="already consumed"):
@@ -143,7 +143,7 @@ async def test_reservation_release_and_commit_keep_balances_consistent():
     assert (await store.commit(second["reservation_id"]))["status"] == "committed"
 
     snapshot = await store.inventory_snapshot(product_id)
-    assert (snapshot["on_hand"], snapshot["reserved"], snapshot["available"]) == (
+    assert (snapshot["on_hand"], snapshot["reserved"], snapshot["available_quantity"]) == (
         35,
         0,
         35,
@@ -207,7 +207,7 @@ async def test_concurrent_reservations_never_oversell_inventory():
     snapshot = await store.inventory_snapshot(product_id)
     assert snapshot["on_hand"] == 42
     assert snapshot["reserved"] == 40
-    assert snapshot["available"] == 2
+    assert snapshot["available_quantity"] == 2
 
 
 
