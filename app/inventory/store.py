@@ -140,9 +140,9 @@ class InventoryStore:
             "product_id": product_id,
             "on_hand": balance["on_hand"],
             "reserved": balance["reserved"],
-            "available": available,
+            "available": available > 0,
+            "available_quantity": available,
             "quantity": available,
-            "is_available": available > 0,
         }
 
     async def create_product(self, request: ProductCreate) -> dict[str, Any]:
