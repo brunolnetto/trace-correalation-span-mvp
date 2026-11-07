@@ -142,12 +142,15 @@ services:
     command: ["python", "-m", "app.order_generator"]
     environment:
       ORDER_API_URL: http://order-api:8000
+      EVENT_COLLECTOR_URL: http://event-collector:8010
       ORDER_GENERATOR_MODE: random
       ORDER_GENERATOR_COUNT: "10"
       ORDER_GENERATOR_SEED: "20261106"
       ORDER_GENERATOR_PRODUCT_ID: "7"
     depends_on:
       order-api:
+        condition: service_healthy
+      event-collector:
         condition: service_healthy
 
 volumes:
