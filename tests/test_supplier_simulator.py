@@ -19,6 +19,7 @@ class InventoryDouble:
         self.balances: dict[int, dict[str, int]] = {}
         self.receipts: dict[str, dict] = {}
         self.receipt_calls = 0
+        self.fail_next_receipt_response = False
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         parts = request.url.path.strip("/").split("/")
@@ -55,6 +56,32 @@ class InventoryDouble:
             request.method == "POST"
             and len(parts) == 3
             and parts[0] == "inventory"
+            and parts[2] == "reservations"
+        ):
+            product_id = int(parts[1])
+            payload = json.loads(request.content)
+            balance = self.balances.get(product_id)
+            if balance is None:
+                return httpx.Response(404)
+            available = balance["on_hand"] - balance["reserved"]
+            if payload["quantity"] > available:
+                return httpx.Response(409, json={"detail": "insufficient stock"})
+            balance["reserved"] += payload["quantity"]
+            return httpx.Response(
+                200,
+                json={
+                    "reservation_id": f"reservation-{payload['order_id']}",
+                    "product_id": product_id,
+                    "order_id": payload["order_id"],
+                    "saga_id": payload["saga_id"],
+                    "quantity": payload["quantity"],
+                    "status": "active",
+                },
+            )
+        if (
+            request.method == "POST"
+            and len(parts) == 3
+            and parts[0] == "inventory"
             and parts[2] == "receipts"
         ):
             self.receipt_calls += 1
@@ -69,6 +96,12 @@ class InventoryDouble:
                     "quantity": payload["quantity"],
                     "reference": payload.get("reference"),
                 }
+            if self.fail_next_receipt_response:
+                self.fail_next_receipt_response = False
+                raise httpx.ReadTimeout(
+                    "simulated response loss after inventory commit",
+                    request=request,
+                )
             return httpx.Response(201, json=self.receipts[key])
         return httpx.Response(404)
 
@@ -221,3 +254,120 @@ async def test_policy_must_target_above_reorder_point():
                 lead_time_seconds=0,
             )
         )
+
+@pytest.mark.asyncio
+async def test_receipt_retry_is_safe_when_inventory_commits_but_response_is_lost(
+    client, inventory_double
+):
+    simulation = SupplierSimulation(
+        initial_time=datetime(2026, 1, 1, tzinfo=UTC)
+    )
+    await simulation.set_policy(
+        ReorderPolicy(
+            product_id=1,
+            reorder_point=5,
+            target_stock=12,
+            lead_time_seconds=60,
+        )
+    )
+    inventory_double.products[1] = {"product_id": 1, "sku": "SKU-1"}
+    inventory_double.balances[1] = {"on_hand": 5, "reserved": 0}
+
+    decision = (await simulation.evaluate_replenishment(client, "corr"))[0]
+    purchase_order_id = decision["purchase_order"]["purchase_order_id"]
+    await simulation.order_purchase_order(purchase_order_id)
+    await simulation.advance_clock(60)
+
+    # Inventory applies the idempotent receipt but the response is lost.
+    inventory_double.fail_next_receipt_response = True
+    with pytest.raises(httpx.ReadTimeout, match="response loss"):
+        await simulation.receive_purchase_order(
+            purchase_order_id, client, "corr"
+        )
+
+    pending = await simulation.get_purchase_order(purchase_order_id)
+    assert pending["status"] == "ordered"
+    assert inventory_double.balances[1]["on_hand"] == 12
+
+    # Retrying the same PO uses the same idempotency key. Inventory returns
+    # the original receipt instead of applying the quantity a second time.
+    retried = await simulation.receive_purchase_order(
+        purchase_order_id, client, "corr"
+    )
+    assert retried["status"] == "received"
+    assert retried["receipt_id"] == inventory_double.receipts[
+        f"1:supplier-po:{purchase_order_id}"
+    ]["receipt_id"]
+    assert inventory_double.receipt_calls == 2
+    assert inventory_double.balances[1]["on_hand"] == 12
+
+    replayed = await simulation.receive_purchase_order(
+        purchase_order_id, client, "corr"
+    )
+    assert replayed["receipt_id"] == retried["receipt_id"]
+    assert inventory_double.receipt_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_reservation_during_lead_time_changes_post_receipt_reorder_decision(
+    client, inventory_double
+):
+    simulation = SupplierSimulation(
+        initial_time=datetime(2026, 1, 1, tzinfo=UTC)
+    )
+    await simulation.set_policy(
+        ReorderPolicy(
+            product_id=1,
+            reorder_point=8,
+            target_stock=12,
+            lead_time_seconds=60,
+        )
+    )
+    inventory_double.products[1] = {"product_id": 1, "sku": "SKU-1"}
+    inventory_double.balances[1] = {"on_hand": 8, "reserved": 0}
+
+    initial_decision = (
+        await simulation.evaluate_replenishment(client, "corr-initial")
+    )[0]
+    first_po_id = initial_decision["purchase_order"]["purchase_order_id"]
+    assert initial_decision["purchase_order"]["quantity"] == 4
+    await simulation.order_purchase_order(first_po_id)
+
+    # A concurrent order reserves most of the available stock while the PO
+    # is in transit. The outstanding PO must suppress a second PO for now.
+    reservation = await client.post(
+        "/inventory/1/reservations",
+        json={"order_id": 901, "saga_id": "saga-during-lead-time", "quantity": 7},
+    )
+    assert reservation.status_code == 200
+    assert reservation.json()["status"] == "active"
+
+    during_lead_time = (
+        await simulation.evaluate_replenishment(client, "corr-during-lead-time")
+    )[0]
+    assert during_lead_time["decision"] == "open_purchase_order_exists"
+    assert during_lead_time["available_quantity"] == 1
+    assert during_lead_time["on_order"] == 4
+    assert during_lead_time["inventory_position"] == 5
+    assert len(await simulation.list_purchase_orders()) == 1
+
+    await simulation.advance_clock(60)
+    received = await simulation.receive_purchase_order(
+        first_po_id, client, "corr-receipt"
+    )
+    assert received["status"] == "received"
+    assert inventory_double.balances[1] == {"on_hand": 12, "reserved": 7}
+
+    # After receipt, the in-flight quantity is no longer counted as on_order.
+    # The remaining available stock (5) is below the reorder point (8), so a
+    # second PO for 7 units is the correct next decision.
+    after_receipt = (
+        await simulation.evaluate_replenishment(client, "corr-after-receipt")
+    )[0]
+    assert after_receipt["decision"] == "purchase_order_created"
+    assert after_receipt["available_quantity"] == 5
+    assert after_receipt["on_order"] == 0
+    assert after_receipt["inventory_position"] == 5
+    assert after_receipt["purchase_order"]["quantity"] == 7
+    assert len(await simulation.list_purchase_orders()) == 2
+
