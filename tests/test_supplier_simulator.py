@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import httpx
+import json
 import pytest
 
 from app.supplier_simulator.store import (
@@ -22,7 +23,7 @@ class InventoryDouble:
     def handler(self, request: httpx.Request) -> httpx.Response:
         parts = request.url.path.strip("/").split("/")
         if request.method == "POST" and parts == ["products"]:
-            payload = __import__("json").loads(request.content)
+            payload = json.loads(request.content)
             if any(item["sku"] == payload["sku"] for item in self.products.values()):
                 return httpx.Response(409, json={"detail": "duplicate SKU"})
             product_id = self.next_product_id
@@ -81,7 +82,9 @@ def client(inventory_double):
 
 
 @pytest.mark.asyncio
-async def test_replenishment_uses_available_stock_and_avoids_duplicate_open_orders(client):
+async def test_replenishment_uses_available_stock_and_avoids_duplicate_open_orders(
+    client, inventory_double
+):
     simulation = SupplierSimulation()
     await simulation.set_policy(
         ReorderPolicy(
@@ -92,7 +95,6 @@ async def test_replenishment_uses_available_stock_and_avoids_duplicate_open_orde
         )
     )
     # on_hand=20 and reserved=15 means only five are available.
-    inventory_double = client._transport.handler.__self__
     inventory_double.products[1] = {"product_id": 1, "sku": "SKU-1"}
     inventory_double.balances[1] = {"on_hand": 20, "reserved": 15}
 
