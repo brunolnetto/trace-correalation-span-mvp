@@ -427,12 +427,12 @@ while (( SECONDS < deadline )); do
     -o "$TMP_DIR/collected-events.json"; then
     if python3 - "$TMP_DIR/collected-events.json" \
       "$PROCESS_CORRELATION_ID" "$DECLINE_CORRELATION_ID" \
-      "$INSUFFICIENT_CORRELATION_ID" <<'PY'
+      "$INSUFFICIENT_CORRELATION_ID" "$SUPPLIER_CORRELATION_ID" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-path, process_id, decline_id, insufficient_id = sys.argv[1:]
+path, process_id, decline_id, insufficient_id, supplier_id = sys.argv[1:]
 payload = json.loads(Path(path).read_text())
 events = [record["event"] for record in payload.get("events", [])]
 required = {
@@ -479,7 +479,7 @@ for correlation_id, messages in required.items():
             if not event.get("trace_id") or not event.get("span_id"):
                 raise SystemExit(1)
 print(f"    raw events persisted: {len(events)}")
-print("    all three order scenarios found in durable raw event storage")
+print("    order and supplier lifecycle events found in durable raw event storage")
 PY
     then
       COLLECTED=1
