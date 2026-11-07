@@ -67,15 +67,21 @@ class GeneratorConfig:
 
     @property
     def plan_id(self) -> str:
+        if self.mode == "coverage":
+            workload = (
+                f"coverage:{self.success_quantity}:"
+                f"{self.decline_quantity}:{self.insufficient_quantity}"
+            )
+        else:
+            workload = (
+                f"random:{self.count}:{self.min_quantity}:{self.max_quantity}"
+            )
         return str(
             uuid5(
                 NAMESPACE_URL,
                 (
-                    f"order-generator-run:{self.mode}:{self.seed}:"
-                    f"{self.product_id}:{self.first_order_id}:{self.count}:"
-                    f"{self.min_quantity}:{self.max_quantity}:"
-                    f"{self.success_quantity}:{self.decline_quantity}:"
-                    f"{self.insufficient_quantity}"
+                    f"order-generator-plan:{workload}:{self.seed}:"
+                    f"{self.product_id}:{self.first_order_id}"
                 ),
             )
         )
