@@ -111,16 +111,26 @@ Collector endpoint.
 ## Outputs and failure semantics
 
 The Simulation Runner writes a machine-readable simulation report containing the
-overall run ID, generator summaries, purchase-order details, and collector barrier
+overall run ID, generator summaries, purchase-order details, and Collector barrier
 result.
 
 The Analytics Runner runs `dbt build`, records the process exit code and parsed
-build summary in a final run report, and exits non-zero if dbt fails. A failed
-simulation prevents the Analytics Runner from starting successfully.
+build summary in a final run report, and exits non-zero if dbt fails. It is part of
+the `standalone` profile and depends on the Simulation Runner with Compose's
+`service_completed_successfully` condition. Collector readiness remains a separate
+health dependency; neither a fixed sleep nor a healthy Collector endpoint substitutes
+for scenario completion.
 
-The standalone profile should be invoked with Compose's `--abort-on-container-exit`
-and `--exit-code-from analytics-runner` options so the command returns the final
-analytics job's status.
+Run the complete standalone lifecycle with:
+
+```bash
+docker compose --profile standalone up --build \
+  --abort-on-container-exit \
+  --exit-code-from analytics-runner
+```
+
+The command returns the Analytics Runner's exit status. The finite Simulation
+Runner completes first; only then does Compose start the Analytics Runner.
 
 ## Non-goals
 
@@ -132,21 +142,32 @@ analytics job's status.
   remain process-local in this MVP.
 
 
-## Incremental implementation
+## Local execution
 
-The first implementation slice is tracked by [issue #13](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/13). It adds a finite Simulation Runner that reuses the existing Order Generator library and the public Order, Inventory, Supplier Simulator, and Event Collector APIs.
-
-For a clean local run, remove the previous Compose containers and named volumes first. **This deletes the current raw-event data and run reports as well as any named-volume data:**
+For a clean run, remove previous Compose containers and named volumes first.
+**This deletes raw-event data, analytics data, reports, and all other named-volume
+data:**
 
 ```bash
 docker compose down -v
 docker compose --profile standalone up --build \
   --abort-on-container-exit \
-  --exit-code-from simulation-runner
+  --exit-code-from analytics-runner
 ```
 
-The Simulation Runner writes `simulation-report.json` to the `run-state` volume. The default scenario uses product 7, 42 opening units, eight initial two-unit orders, one 34-unit purchase order, four more two-unit orders during lead time, and a final inventory position of 52 after receipt.
+The Simulation Runner writes `simulation-report.json` to the `run-state` volume.
+The Analytics Runner writes `run-report.json` and dbt artifacts to
+`analytics-data`. The default scenario uses product 7, 42 opening units, eight
+initial two-unit orders, one 34-unit purchase order, four more two-unit orders
+during lead time, and a final inventory position of 52 after receipt.
 
-The runner validates the opening balance and rejects a run if the product has pre-existing reservations or an active purchase order. Each run gets a distinct run ID, order IDs, order correlation IDs, and one separate supplier correlation ID. Set `STANDALONE_RUN_ID` only when an explicitly controlled identifier is required; do not reuse it to rerun a scenario because the Order API in this MVP does not yet provide durable order-request idempotency.
+The runner validates the opening balance and rejects a run if the product has
+pre-existing reservations or an active purchase order. Each run gets a distinct
+run ID, order IDs, order correlation IDs, and one separate supplier correlation
+ID. Set `STANDALONE_RUN_ID` only when an explicitly controlled identifier is
+required; do not reuse it to rerun a scenario because the Order API in this MVP
+does not yet provide durable order-request idempotency.
 
-The Simulation Runner now waits for the correlation-scoped Collector completion barrier described above before reporting success. The finite Analytics Runner remains tracked in [issue #15](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/15); this is still an intermediate milestone, not the final standalone command.
+The Simulation Runner waits for the correlation-scoped Collector completion
+barrier before reporting success. Compose starts the Analytics Runner only after
+the simulation exits successfully.
