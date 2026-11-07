@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException
 from opentelemetry import trace
 
 from app.observability import configure_observability, correlation_id_context
-from app import workflow
+from app.order import workflow
 from app.order.workflow import (
     PaymentDeclined,
     ProcessOrderRequest,
@@ -204,7 +204,6 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
             "payment_id": result["payment_id"],
             "reservation_id": result["reservation_id"],
             "total_amount": str(amount),
-            "currency": "catalog-defined",
         },
     )
     return {
