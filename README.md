@@ -187,9 +187,11 @@ rejects overselling within one process.
 ## Deterministic order generator
 
 A one-shot generator exercises the public Order API; it never changes inventory
-state directly. Its seed determines the generated quantities, order IDs, and
-correlation IDs, making scenario input reproducible across runs. Latency is
-measured at runtime and therefore is not expected to be identical.
+state directly. Its seed determines quantities and order IDs, so a
+`plan_id` identifies the same workload definition. Each invocation gets a
+unique `run_id` and unique per-attempt `correlation_id` values, preventing
+separate executions from being conflated in analytics. Latency is measured at
+runtime and is not expected to be identical.
 
 Start the normal Compose services, then run a seeded random batch:
 
