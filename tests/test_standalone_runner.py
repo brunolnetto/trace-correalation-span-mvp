@@ -31,42 +31,48 @@ def _scenario_transport(
         host = request.url.host
         path = request.url.path
         correlation_id = request.headers.get("X-Correlation-ID")
-        if host == "order-api":
-            if request.method == "POST" and path.startswith("/orders/"):
-                order_id = int(path.split("/")[2])
-                payload = json.loads(request.content)
-                state["order_requests"].append(
-                    {
-                        "order_id": order_id,
-                        "quantity": payload["quantity"],
-                        "correlation_id": correlation_id,
-                    }
-                )
-                if reject_order_number == len(state["order_requests"]):
-                    return httpx.Response(
-                        409,
-                        json={"detail": "simulated inventory rejection"},
-                    )
-                state["reserved"] += payload["quantity"]
+        if (
+            host == "order-api"
+            and request.method == "POST"
+            and path.startswith("/orders/")
+        ):
+            order_id = int(path.split("/")[2])
+            payload = json.loads(request.content)
+            state["order_requests"].append(
+                {
+                    "order_id": order_id,
+                    "quantity": payload["quantity"],
+                    "correlation_id": correlation_id,
+                }
+            )
+            if reject_order_number == len(state["order_requests"]):
                 return httpx.Response(
-                    201,
-                    json={"order_id": order_id, "status": "processed"},
+                    409,
+                    json={"detail": "simulated inventory rejection"},
                 )
+            state["reserved"] += payload["quantity"]
+            return httpx.Response(
+                201,
+                json={"order_id": order_id, "status": "processed"},
+            )
 
-        if host == "event-collector":
-            if request.method == "POST" and path == "/v1/events":
-                payload = json.loads(request.content)
-                events = payload["events"]
-                state["collector_events"].extend(events)
-                return httpx.Response(
-                    202,
-                    json={
-                        "accepted": len(events),
-                        "duplicates": 0,
-                        "conflicts": 0,
-                        "quarantined": 0,
-                    },
-                )
+        if (
+            host == "event-collector"
+            and request.method == "POST"
+            and path == "/v1/events"
+        ):
+            payload = json.loads(request.content)
+            events = payload["events"]
+            state["collector_events"].extend(events)
+            return httpx.Response(
+                202,
+                json={
+                    "accepted": len(events),
+                    "duplicates": 0,
+                    "conflicts": 0,
+                    "quarantined": 0,
+                },
+            )
 
         if host == "inventory-api":
             if request.method == "GET" and path == "/products/7":
