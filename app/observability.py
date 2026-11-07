@@ -135,6 +135,16 @@ def configure_logging(service_name: str) -> None:
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
 
+    # Service logs are forwarded in a background thread. Request handlers only
+    # enqueue an already-formatted event; they never wait on collector I/O.
+    from app.event_publisher import collector_handler_from_environment
+
+    collector_handler = collector_handler_from_environment(
+        service_name, JsonFormatter(service_name)
+    )
+    if collector_handler is not None:
+        root_logger.addHandler(collector_handler)
+
     # Uvicorn installs dedicated handlers before importing the application.
     # Route its logs through the same JSON formatter as application logs.
     for logger_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):

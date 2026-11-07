@@ -20,6 +20,7 @@ INSUFFICIENT_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440003"
 ORDER_URL="${ORDER_URL:-http://127.0.0.1:18000}"
 INVENTORY_URL="${INVENTORY_URL:-http://127.0.0.1:18001}"
 JAEGER_URL="${JAEGER_URL:-http://127.0.0.1:16686}"
+EVENT_COLLECTOR_URL="${EVENT_COLLECTOR_URL:-http://127.0.0.1:18003}"
 WAIT_SECONDS="${WAIT_SECONDS:-60}"
 CLEANUP=0
 
@@ -85,6 +86,7 @@ echo "    waiting for service health endpoints (up to ${WAIT_SECONDS}s)"
 wait_for_url "$INVENTORY_URL/healthz" "inventory-api"
 wait_for_url "$ORDER_URL/healthz" "order-api"
 wait_for_url "$JAEGER_URL/" "Jaeger UI"
+wait_for_url "$EVENT_COLLECTOR_URL/healthz" "event-collector"
 
 echo "==> 5/6: Create product, receive stock, and exercise order scenarios"
 curl --silent --show-error --fail \
@@ -328,10 +330,74 @@ print("    success, compensation, and stock-rejection events correlated across b
 PY
 
 echo
+deadline=$((SECONDS + WAIT_SECONDS))
+COLLECTED=0
+while (( SECONDS < deadline )); do
+  if curl --silent --show-error --fail \
+    "$EVENT_COLLECTOR_URL/v1/events?limit=10000" \
+    -o "$TMP_DIR/collected-events.json"; then
+    if python3 - "$TMP_DIR/collected-events.json" \
+      "$PROCESS_CORRELATION_ID" "$DECLINE_CORRELATION_ID" \
+      "$INSUFFICIENT_CORRELATION_ID" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path, process_id, decline_id, insufficient_id = sys.argv[1:]
+payload = json.loads(Path(path).read_text())
+events = [record["event"] for record in payload.get("events", [])]
+required = {
+    process_id: {
+        "order.process.started",
+        "order.process.completed",
+        "inventory.reservation.created",
+    },
+    decline_id: {
+        "order.process.failed",
+        "inventory.reservation.created",
+        "inventory.reservation.released",
+    },
+    insufficient_id: {
+        "order.process.failed",
+        "inventory.reservation.rejected",
+    },
+}
+for correlation_id, messages in required.items():
+    correlated = [
+        event for event in events
+        if event.get("correlation_id") == correlation_id
+    ]
+    found = {event.get("event_name") for event in correlated}
+    services = {event.get("service") for event in correlated}
+    if not messages.issubset(found):
+        raise SystemExit(1)
+    if not {"order-api", "inventory-api"}.issubset(services):
+        raise SystemExit(1)
+    for event in correlated:
+        if event.get("event_name") in messages:
+            if not event.get("trace_id") or not event.get("span_id"):
+                raise SystemExit(1)
+print(f"    raw events persisted: {len(events)}")
+print("    all three order scenarios found in durable raw event storage")
+PY
+    then
+      COLLECTED=1
+      break
+    fi
+  fi
+  sleep 1
+done
+
+if (( ! COLLECTED )); then
+  curl --silent --show-error "$EVENT_COLLECTOR_URL/v1/stats" >&2 || true
+  die "Raw event collector did not persist all expected scenario events"
+fi
+
 echo "SUCCESS: Catalog, inventory, Saga, and observability reproduction passed."
 echo "  Order API:     $ORDER_URL"
 echo "  Inventory API: $INVENTORY_URL"
 echo "  Jaeger UI:     $JAEGER_URL"
+echo "  Event API:     $EVENT_COLLECTOR_URL"
 echo
 if (( CLEANUP )); then
   echo "The Compose stack will be stopped automatically."
