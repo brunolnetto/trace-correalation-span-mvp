@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Reproduce the Saga + observability flow:
-# uv tests/lint -> build/start services -> success + compensation scenarios ->
-# validate JSON logs and the distributed trace in Jaeger.
+# Reproduce the Saga + inventory + observability flow:
+# uv tests/lint -> build/start services -> catalog/stock setup ->
+# success + compensation + insufficient-stock scenarios -> trace/log checks.
 #
 # Usage:
 #   ./scripts/reproduce-local.sh
@@ -13,12 +13,10 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-unset VIRTUAL_ENV
-export UV_PROJECT_ENVIRONMENT="$ROOT_DIR/.venv"
-
 READ_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440000"
 PROCESS_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440001"
 DECLINE_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440002"
+INSUFFICIENT_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440003"
 ORDER_URL="${ORDER_URL:-http://127.0.0.1:18000}"
 INVENTORY_URL="${INVENTORY_URL:-http://127.0.0.1:18001}"
 JAEGER_URL="${JAEGER_URL:-http://127.0.0.1:16686}"
@@ -88,12 +86,32 @@ wait_for_url "$INVENTORY_URL/healthz" "inventory-api"
 wait_for_url "$ORDER_URL/healthz" "order-api"
 wait_for_url "$JAEGER_URL/" "Jaeger UI"
 
-echo "==> 5/6: Exercise read-only tracing, successful saga, and compensation"
+echo "==> 5/6: Create product, receive stock, and exercise order scenarios"
+curl --silent --show-error --fail \
+  --header "Content-Type: application/json" \
+  --data '{"sku":"LOW-STOCK-001","name":"Low stock demo product","category":"demo","unit_price":"10.00"}' \
+  "$INVENTORY_URL/products" > "$TMP_DIR/product.json"
+
+LOW_STOCK_PRODUCT_ID="$(python3 - "$TMP_DIR/product.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+print(json.loads(Path(sys.argv[1]).read_text())["product_id"])
+PY
+)"
+
+curl --silent --show-error --fail \
+  --header "Content-Type: application/json" \
+  --data '{"quantity":4,"idempotency_key":"demo-opening-receipt-001","reference":"DEMO-PO-001"}' \
+  "$INVENTORY_URL/inventory/$LOW_STOCK_PRODUCT_ID/receipts" \
+  > "$TMP_DIR/receipt.json"
+
 curl --silent --show-error --fail \
   --dump-header "$TMP_DIR/read.headers" \
   --output "$TMP_DIR/read.json" \
   --header "X-Correlation-ID: $READ_CORRELATION_ID" \
-  "$ORDER_URL/orders/123"
+  "$ORDER_URL/orders/7"
 
 PROCESS_STATUS="$(curl --silent --show-error \
   --dump-header "$TMP_DIR/process.headers" \
@@ -121,20 +139,50 @@ DECLINE_STATUS="$(curl --silent --show-error \
   die "Expected payment decline with compensation to return 402, got $DECLINE_STATUS"
 }
 
+INSUFFICIENT_STATUS="$(curl --silent --show-error \
+  --dump-header "$TMP_DIR/insufficient.headers" \
+  --output "$TMP_DIR/insufficient.json" \
+  --write-out '%{http_code}' \
+  --header "Content-Type: application/json" \
+  --header "X-Correlation-ID: $INSUFFICIENT_CORRELATION_ID" \
+  --data "{\"product_id\":$LOW_STOCK_PRODUCT_ID,\"quantity\":5,\"amount\":10.00}" \
+  "$ORDER_URL/orders/125/process")"
+[[ "$INSUFFICIENT_STATUS" == "409" ]] || {
+  cat "$TMP_DIR/insufficient.json" >&2
+  die "Expected insufficient inventory to return 409, got $INSUFFICIENT_STATUS"
+}
+
 curl --silent --show-error --fail --output "$TMP_DIR/inventory.json" "$INVENTORY_URL/inventory/7"
+curl --silent --show-error --fail --output "$TMP_DIR/low-stock.json" \
+  "$INVENTORY_URL/inventory/$LOW_STOCK_PRODUCT_ID"
 
 python3 - "$TMP_DIR/process.headers" "$TMP_DIR/process.json" \
   "$TMP_DIR/decline.json" "$TMP_DIR/inventory.json" \
-  "$PROCESS_CORRELATION_ID" "$DECLINE_CORRELATION_ID" <<'PY'
+  "$TMP_DIR/low-stock.json" "$TMP_DIR/insufficient.json" \
+  "$PROCESS_CORRELATION_ID" "$DECLINE_CORRELATION_ID" \
+  "$LOW_STOCK_PRODUCT_ID" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-process_headers, process_body, decline_body, inventory_body, process_id, decline_id = sys.argv[1:]
+(
+    process_headers,
+    process_body,
+    decline_body,
+    inventory_body,
+    low_stock_body,
+    insufficient_body,
+    process_id,
+    decline_id,
+    low_stock_product_id,
+) = sys.argv[1:]
+
 headers = Path(process_headers).read_text().lower().splitlines()
 process = json.loads(Path(process_body).read_text())
 decline = json.loads(Path(decline_body).read_text())
 inventory = json.loads(Path(inventory_body).read_text())
+low_stock = json.loads(Path(low_stock_body).read_text())
+insufficient = json.loads(Path(insufficient_body).read_text())
 
 returned_id = next(
     (line.split(":", 1)[1].strip() for line in headers
@@ -151,11 +199,21 @@ assert process["payment_id"], process
 assert decline["detail"] == (
     "Payment declined; completed actions were compensated."
 ), decline
+assert inventory["on_hand"] == 42, inventory
+assert inventory["reserved"] == 2, inventory
+assert inventory["available"] == 40, inventory
 assert inventory["quantity"] == 40, inventory
+assert insufficient["detail"] == "Insufficient inventory", insufficient
+assert low_stock["product_id"] == int(low_stock_product_id), low_stock
+assert low_stock["on_hand"] == 4, low_stock
+assert low_stock["reserved"] == 0, low_stock
+assert low_stock["available"] == 4, low_stock
 print(f"    successful saga ID: {process['saga_id']}")
 print(f"    successful order correlation ID: {process_id}")
 print(f"    declined order correlation ID: {decline_id}")
-print(f"    inventory after compensation: {inventory['quantity']}")
+print(f"    low-stock product ID: {low_stock_product_id}")
+print("    inventory after compensation: on_hand=42 reserved=2 available=40")
+print("    insufficient-stock order rejected without changing inventory")
 PY
 
 echo "==> 6/6: Verify JSON logs and Saga traces in Jaeger"
@@ -198,29 +256,49 @@ fi
 echo "    Jaeger contains a cross-service reservation + compensation trace"
 
 docker compose logs --no-log-prefix --no-color order-api inventory-api > "$TMP_DIR/service.log"
-python3 - "$TMP_DIR/service.log" "$PROCESS_CORRELATION_ID" "$DECLINE_CORRELATION_ID" <<'PY'
+python3 - "$TMP_DIR/service.log" "$PROCESS_CORRELATION_ID" \
+  "$DECLINE_CORRELATION_ID" "$INSUFFICIENT_CORRELATION_ID" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-path, process_id, decline_id = sys.argv[1:]
+path, process_id, decline_id, insufficient_id = sys.argv[1:]
 records = []
 for line in Path(path).read_text().splitlines():
     try:
         record = json.loads(line)
     except json.JSONDecodeError:
         continue
-    if record.get("correlation_id") in {process_id, decline_id}:
+    if record.get("correlation_id") in {
+        process_id,
+        decline_id,
+        insufficient_id,
+    }:
         records.append(record)
 
 scenarios = (
     (
         process_id,
-        {"order.process.started", "order.process.completed", "inventory.reservation.created"},
+        {
+            "order.process.started",
+            "order.process.completed",
+            "inventory.reservation.created",
+        },
     ),
     (
         decline_id,
-        {"order.process.failed", "inventory.reservation.created", "inventory.reservation.released"},
+        {
+            "order.process.failed",
+            "inventory.reservation.created",
+            "inventory.reservation.released",
+        },
+    ),
+    (
+        insufficient_id,
+        {
+            "order.process.failed",
+            "inventory.reservation.rejected",
+        },
     ),
 )
 for correlation_id, required_messages in scenarios:
@@ -242,11 +320,11 @@ for correlation_id, required_messages in scenarios:
             assert record.get("span_id"), f"missing span_id: {record}"
 
 print(f"    correlated JSON log records: {len(records)}")
-print("    success and compensation events correlated across both services")
+print("    success, compensation, and stock-rejection events correlated across both services")
 PY
 
 echo
-echo "SUCCESS: Saga observability reproduction passed."
+echo "SUCCESS: Catalog, inventory, Saga, and observability reproduction passed."
 echo "  Order API:     $ORDER_URL"
 echo "  Inventory API: $INVENTORY_URL"
 echo "  Jaeger UI:     $JAEGER_URL"
