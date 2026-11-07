@@ -201,7 +201,7 @@ assert decline["detail"] == (
 ), decline
 assert inventory["on_hand"] == 42, inventory
 assert inventory["reserved"] == 2, inventory
-assert inventory["available"] == 40, inventory
+assert inventory["available_quantity"] == 40, inventory
 assert inventory["quantity"] == 40, inventory
 assert insufficient["detail"] == (
     "Inventory service rejected the reservation."
@@ -209,7 +209,7 @@ assert insufficient["detail"] == (
 assert low_stock["product_id"] == int(low_stock_product_id), low_stock
 assert low_stock["on_hand"] == 4, low_stock
 assert low_stock["reserved"] == 0, low_stock
-assert low_stock["available"] == 4, low_stock
+assert low_stock["available_quantity"] == 4, low_stock
 print(f"    successful saga ID: {process['saga_id']}")
 print(f"    successful order correlation ID: {process_id}")
 print(f"    declined order correlation ID: {decline_id}")
