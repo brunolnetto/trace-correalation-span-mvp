@@ -134,11 +134,11 @@ async def test_reservation_release_and_commit_keep_balances_consistent():
     assert repeated == reservation
 
     snapshot = await store.inventory_snapshot(product_id)
-    assert (snapshot["on_hand"], snapshot["reserved"], snapshot["available_quantity"]) == (
-        42,
-        5,
-        37,
-    )
+    assert (
+        snapshot["on_hand"],
+        snapshot["reserved"],
+        snapshot["available_quantity"],
+    ) == (42, 5, 37)
 
     released = await store.release(reservation["reservation_id"])
     assert released["status"] == "released"
@@ -159,11 +159,11 @@ async def test_reservation_release_and_commit_keep_balances_consistent():
     assert (await store.commit(second["reservation_id"]))["status"] == "committed"
 
     snapshot = await store.inventory_snapshot(product_id)
-    assert (snapshot["on_hand"], snapshot["reserved"], snapshot["available_quantity"]) == (
-        35,
-        0,
-        35,
-    )
+    assert (
+        snapshot["on_hand"],
+        snapshot["reserved"],
+        snapshot["available_quantity"],
+    ) == (35, 0, 35)
     assert (await store.release(second["reservation_id"]))["status"] == "committed"
 
 
