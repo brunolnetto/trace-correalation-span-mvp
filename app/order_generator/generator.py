@@ -86,9 +86,16 @@ class OrderAttempt:
         return asdict(self)
 
 
-def _correlation_id(seed: int, index: int) -> str:
-    return str(uuid5(NAMESPACE_URL, f"order-generator:{seed}:{index}"))
-
+def _correlation_id(config: GeneratorConfig, index: int) -> str:
+    return str(
+        uuid5(
+            NAMESPACE_URL,
+            (
+                f"order-generator:{config.mode}:{config.seed}:"
+                f"{config.product_id}:{config.first_order_id}:{index}"
+            ),
+        )
+    )
 
 def build_plan(config: GeneratorConfig) -> list[OrderCommand]:
     """Build a repeatable request plan from the seed and run configuration."""
@@ -105,7 +112,7 @@ def build_plan(config: GeneratorConfig) -> list[OrderCommand]:
                 order_id=config.first_order_id + index,
                 product_id=config.product_id,
                 quantity=quantity,
-                correlation_id=_correlation_id(config.seed, index),
+                correlation_id=_correlation_id(config, index),
                 scenario=scenario,
                 expected_outcome=COVERAGE_EXPECTATIONS[scenario],
             )
@@ -117,7 +124,7 @@ def build_plan(config: GeneratorConfig) -> list[OrderCommand]:
             order_id=config.first_order_id + index,
             product_id=config.product_id,
             quantity=rng.randint(config.min_quantity, config.max_quantity),
-            correlation_id=_correlation_id(config.seed, index),
+            correlation_id=_correlation_id(config, index),
             scenario="random",
         )
         for index in range(config.count)
@@ -287,7 +294,12 @@ def emit_events(
     for attempt in attempts:
         print(
             json.dumps(
-                {"event": "order_generator.attempt", **attempt.to_dict()},
+                {
+                    "event": "order_generator.attempt",
+                    "mode": config.mode,
+                    "seed": config.seed,
+                    **attempt.to_dict(),
+                },
                 sort_keys=True,
             )
         )
