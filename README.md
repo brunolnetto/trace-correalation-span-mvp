@@ -397,11 +397,12 @@ and starts Jaeger, the Order/Inventory APIs, the Supplier Simulation API, and
 the Event Collector. It exercises a successful order, a payment decline with
 compensation, an insufficient-stock rejection, supplier onboarding and
 replenishment through a simulated lead time, and the generator's three
-coverage scenarios. It then verifies balances, correlated JSON logs,
-cross-service Jaeger traces, and raw event persistence for the order,
-supplier, and generator events. It leaves the Compose stack running for
-inspection; stop it with `docker compose down`. Pass `--cleanup` to stop the
-stack automatically when the script exits.
+coverage scenarios. It verifies balances, correlated JSON logs, cross-service
+Jaeger traces, and raw event persistence for order, supplier, and generator
+events, then runs `dbt build` against the collected raw event volume. It
+leaves the Compose stack running for inspection; stop it with
+`docker compose down`. Pass `--cleanup` to stop the stack automatically
+when the script exits.
 
 After changing dependencies, regenerate and commit the lockfile:
 
