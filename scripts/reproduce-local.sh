@@ -203,7 +203,9 @@ assert inventory["on_hand"] == 42, inventory
 assert inventory["reserved"] == 2, inventory
 assert inventory["available"] == 40, inventory
 assert inventory["quantity"] == 40, inventory
-assert insufficient["detail"] == "Insufficient inventory", insufficient
+assert insufficient["detail"] == (
+    "Inventory service rejected the reservation."
+), insufficient
 assert low_stock["product_id"] == int(low_stock_product_id), low_stock
 assert low_stock["on_hand"] == 4, low_stock
 assert low_stock["reserved"] == 0, low_stock
