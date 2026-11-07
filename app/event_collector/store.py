@@ -99,11 +99,14 @@ class JsonlEventStore:
         conflicts: list[RawEvent] = []
 
         with self._lock:
+            pending_hashes: dict[str, str] = {}
             for event in events:
                 event_payload = event.model_dump(mode="json")
                 event_id = str(event.event_id)
                 fingerprint = _canonical_hash(event_payload)
-                existing = self._hashes.get(event_id)
+                existing = self._hashes.get(
+                    event_id, pending_hashes.get(event_id)
+                )
                 if existing is not None:
                     if existing == fingerprint:
                         duplicates.append(event_id)
@@ -117,7 +120,7 @@ class JsonlEventStore:
                     "event": event_payload,
                 }
                 accepted.append(record)
-                self._hashes[event_id] = fingerprint
+                pending_hashes[event_id] = fingerprint
 
             if accepted:
                 with self.events_path.open("a", encoding="utf-8") as stream:
@@ -129,10 +132,11 @@ class JsonlEventStore:
                                 sort_keys=True,
                                 separators=(",", ":"),
                             )
-                            + "\n"
+                            + "\\n"
                         )
                     stream.flush()
                     os.fsync(stream.fileno())
+                self._hashes.update(pending_hashes)
 
         return {
             "accepted": len(accepted),
