@@ -119,7 +119,7 @@ PROCESS_STATUS="$(curl --silent --show-error \
   --write-out '%{http_code}' \
   --header "Content-Type: application/json" \
   --header "X-Correlation-ID: $PROCESS_CORRELATION_ID" \
-  --data '{"product_id":7,"quantity":2,"amount":99.90}' \
+  --data '{"product_id":7,"quantity":2}' \
   "$ORDER_URL/orders/123/process")"
 [[ "$PROCESS_STATUS" == "201" ]] || {
   cat "$TMP_DIR/process.json" >&2
@@ -132,7 +132,7 @@ DECLINE_STATUS="$(curl --silent --show-error \
   --write-out '%{http_code}' \
   --header "Content-Type: application/json" \
   --header "X-Correlation-ID: $DECLINE_CORRELATION_ID" \
-  --data '{"product_id":7,"quantity":3,"amount":1001.00}' \
+  --data '{"product_id":7,"quantity":11}' \
   "$ORDER_URL/orders/124/process")"
 [[ "$DECLINE_STATUS" == "402" ]] || {
   cat "$TMP_DIR/decline.json" >&2
@@ -145,7 +145,7 @@ INSUFFICIENT_STATUS="$(curl --silent --show-error \
   --write-out '%{http_code}' \
   --header "Content-Type: application/json" \
   --header "X-Correlation-ID: $INSUFFICIENT_CORRELATION_ID" \
-  --data "{\"product_id\":$LOW_STOCK_PRODUCT_ID,\"quantity\":5,\"amount\":10.00}" \
+  --data "{\"product_id\":$LOW_STOCK_PRODUCT_ID,\"quantity\":5}" \
   "$ORDER_URL/orders/125/process")"
 [[ "$INSUFFICIENT_STATUS" == "409" ]] || {
   cat "$TMP_DIR/insufficient.json" >&2
