@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from decimal import Decimal
 from uuid import uuid4
 
 import httpx
@@ -9,6 +10,7 @@ from fastapi import FastAPI, HTTPException
 from opentelemetry import trace
 
 from app.observability import configure_observability, correlation_id_context
+from app import workflow
 from app.order.workflow import (
     PaymentDeclined,
     ProcessOrderRequest,
@@ -74,6 +76,33 @@ async def get_order(order_id: int):
 async def process_order(order_id: int, request: ProcessOrderRequest):
     """Run the order saga and compensate completed actions on failure."""
     correlation_id = correlation_id_context.get() or ""
+
+    try:
+        async with workflow.create_inventory_client() as client:
+            response = await client.get(
+                f"/products/{request.product_id}",
+                headers={"X-Correlation-ID": correlation_id},
+            )
+            response.raise_for_status()
+            product = response.json()
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:
+            raise HTTPException(
+                status_code=404, detail="Product not found."
+            ) from None
+        raise HTTPException(
+            status_code=502, detail="Product catalog rejected the lookup."
+        ) from None
+    except httpx.HTTPError:
+        raise HTTPException(
+            status_code=503, detail="Product catalog is temporarily unavailable."
+        ) from None
+
+    if not product["is_active"]:
+        raise HTTPException(status_code=409, detail="Product is inactive.")
+
+    unit_price = Decimal(str(product["unit_price"]))
+    amount = unit_price * request.quantity
     saga_id = str(uuid4())
     saga, compensation_tracker = create_order_processing_saga()
 
@@ -96,7 +125,7 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
                 "order_id": order_id,
                 "product_id": request.product_id,
                 "quantity": request.quantity,
-                "amount": request.amount,
+                "amount": amount,
                 "correlation_id": correlation_id,
             },
             saga_id=saga_id,
@@ -174,6 +203,8 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
             "saga_id": saga_id,
             "payment_id": result["payment_id"],
             "reservation_id": result["reservation_id"],
+            "total_amount": str(amount),
+            "currency": "catalog-defined",
         },
     )
     return {
@@ -183,4 +214,6 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
         "correlation_id": correlation_id,
         "reservation_id": result["reservation_id"],
         "payment_id": result["payment_id"],
+        "unit_price": str(unit_price),
+        "total_amount": str(amount),
     }
