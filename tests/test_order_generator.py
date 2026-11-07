@@ -248,6 +248,9 @@ def test_generator_plan_id_and_run_correlations_are_stable_and_unique():
     assert {
         event["attributes"]["run_id"] for event in attempt_events
     } == {execution_id}
+    assert {
+        event["attributes"]["plan_id"] for event in attempt_events
+    } == {config.plan_id}
     assert [command.quantity for command in second_execution] == [
         command.quantity for command in plan
     ]
