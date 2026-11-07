@@ -4,7 +4,8 @@
 
 Provide one finite, reproducible execution of the existing order-to-inventory-to-supplier
 workflow followed by the dbt analytics build. This is a Compose execution profile, not
-a new orchestration platform.
+a new orchestration platform. The implementation sequence and issue dependencies are tracked in
+[the standalone execution roadmap](standalone-roadmap.md).
 
 The Supplier Simulator and Event Collector remain independent services with separate
 responsibilities and lifecycles.
