@@ -71,7 +71,6 @@ The required event contract is derived from the current producer log messages:
 | Each order correlation ID | `order.process.started` | 1 |
 | Each order correlation ID | `order.process.completed` | 1 |
 | Each order correlation ID | `inventory.reservation.created` | 1 |
-| Each order correlation ID | `inventory.reservation.committed` | 1 |
 | Supplier correlation ID | `supplier.reorder_policy.updated` | 1 |
 | Supplier correlation ID | `supplier.replenishment.evaluated` | 3 |
 | Supplier correlation ID | `supplier.purchase_order.ordered` | 1 |
@@ -85,8 +84,13 @@ producer. Creation is represented by the first
 events correspond to the initial decision, the in-flight duplicate-suppression
 decision, and the post-receipt decision.
 
-For the default 12-order scenario, the barrier requires 67 unique event records:
-five per order correlation ID and seven under the supplier correlation ID.
+The current Order Saga creates reservations but does not call the Inventory
+reservation-commit endpoint, so `inventory.reservation.committed` is deliberately
+not part of this contract. The endpoint exists, but requiring its event here would
+make the barrier wait for an event this workflow never emits.
+
+For the default 12-order scenario, the barrier requires 55 unique event records:
+four per order correlation ID and seven under the supplier correlation ID.
 It ignores events from other correlation IDs and counts each persisted event ID
 once, so replayed/duplicated delivery cannot satisfy a missing pair. It polls
 `GET /v1/events?limit=10000`; the Collector's persist-before-ack contract means
