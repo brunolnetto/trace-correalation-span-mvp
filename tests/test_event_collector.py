@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from uuid import UUID
 
@@ -167,8 +168,6 @@ def test_recovery_separates_incomplete_final_record_before_next_append(
 
 
 def test_collector_handler_does_not_forward_its_own_httpx_transport_logs():
-    import logging
-
     from app.event_publisher import AsyncCollectorHandler
 
     handler = AsyncCollectorHandler(
