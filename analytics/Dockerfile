@@ -6,6 +6,7 @@ COPY analytics/requirements.txt ./
 RUN python -m pip install --no-cache-dir --disable-pip-version-check -r requirements.txt
 
 COPY analytics/ ./
+COPY app/analytics_runner.py ./analytics_runner.py
 
 ENV DBT_PROFILES_DIR=/workspace
 
