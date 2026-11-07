@@ -210,6 +210,30 @@ services:
       event-collector:
         condition: service_healthy
 
+  analytics-runner:
+    build:
+      context: .
+      dockerfile: analytics/Dockerfile
+    profiles: ["analytics-runner"]
+    working_dir: /workspace
+    environment:
+      SIMULATION_REPORT_PATH: /run-state/simulation-report.json
+      RAW_EVENTS_PATH: /raw/events.jsonl
+      DUCKDB_PATH: /analytics-data/trace_events.duckdb
+      DBT_TARGET_PATH: /analytics-data/dbt-target
+      ANALYTICS_REPORT_PATH: /analytics-data/run-report.json
+      DBT_PROJECT_DIR: /workspace
+      DBT_PROFILES_DIR: /workspace
+      ANALYTICS_TIMEOUT_SECONDS: "3600"
+    command: ["python", "/workspace/analytics_runner.py"]
+    volumes:
+      - event-data:/raw:ro
+      - run-state:/run-state:ro
+      - analytics-data:/analytics-data
+    depends_on:
+      event-collector:
+        condition: service_healthy
+
 volumes:
   event-data:
   analytics-data:
