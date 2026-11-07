@@ -13,6 +13,10 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
 
+from app.collector_barrier import (
+    expected_event_counts,
+    wait_for_collector_events,
+)
 from app.order_generator.generator import (
     GeneratorConfig,
     build_generator_events,
@@ -43,6 +47,9 @@ class RunnerConfig:
     order_quantity: int = 2
     seed: int = 20261107
     request_timeout_seconds: float = 10.0
+    collector_barrier_timeout_seconds: float = 30.0
+    collector_poll_initial_backoff_seconds: float = 0.1
+    collector_poll_max_backoff_seconds: float = 2.0
     report_path: str = "/run-state/simulation-report.json"
     run_id: str | None = None
 
@@ -73,6 +80,12 @@ class RunnerConfig:
             raise ValueError("target_stock must exceed reorder_point")
         if self.request_timeout_seconds <= 0:
             raise ValueError("request_timeout_seconds must be positive")
+        if self.collector_barrier_timeout_seconds <= 0:
+            raise ValueError("collector_barrier_timeout_seconds must be positive")
+        if self.collector_poll_initial_backoff_seconds <= 0:
+            raise ValueError("collector_poll_initial_backoff_seconds must be positive")
+        if self.collector_poll_max_backoff_seconds < self.collector_poll_initial_backoff_seconds:
+            raise ValueError("collector_poll_max_backoff_seconds must be at least the initial backoff")
         if not self.report_path:
             raise ValueError("report_path must not be empty")
 
@@ -305,6 +318,7 @@ async def run_scenario(
         "order_batches": [],
         "inventory_checkpoints": {},
         "purchase_order": None,
+        "collector_barrier": None,
         "assertions": [],
         "error": None,
     }
@@ -742,6 +756,35 @@ async def run_scenario(
                 len(product_orders),
             )
 
+        expected_events = expected_event_counts(
+            report["correlation_ids"]["orders"],
+            supplier_correlation_id,
+        )
+        async with _make_client(
+            config.event_collector_url,
+            config.request_timeout_seconds,
+            transport,
+        ) as collector:
+            barrier = await wait_for_collector_events(
+                collector,
+                expected_events,
+                timeout_seconds=config.collector_barrier_timeout_seconds,
+                initial_backoff_seconds=config.collector_poll_initial_backoff_seconds,
+                max_backoff_seconds=config.collector_poll_max_backoff_seconds,
+                correlation_id=supplier_correlation_id,
+            )
+        report["collector_barrier"] = barrier
+        if barrier["status"] != "complete":
+            missing = "; ".join(
+                f"{item['correlation_id']}:{item['event_name']} "
+                f"({item['observed']}/{item['expected']})"
+                for item in barrier["missing"]
+            )
+            raise ScenarioError(
+                "Event Collector completion barrier timed out; "
+                f"missing events: {missing}; last_error={barrier['last_error']}"
+            )
+
         report["status"] = "succeeded"
         report["finished_at"] = _now()
         report["summary"] = {
@@ -750,6 +793,7 @@ async def run_scenario(
             "purchase_order_quantity": expected_po_quantity,
             "final_inventory_position": final_checkpoint["available_quantity"],
             "assertions_passed": len(report["assertions"]),
+            "collector_events_observed": report["collector_barrier"]["observed_count"],
         }
         return report
     except Exception as exc:
@@ -835,6 +879,21 @@ def _parser() -> argparse.ArgumentParser:
         default=float(os.getenv("SIMULATION_REQUEST_TIMEOUT_SECONDS", "10")),
     )
     parser.add_argument(
+        "--collector-barrier-timeout-seconds",
+        type=float,
+        default=float(os.getenv("SIMULATION_COLLECTOR_BARRIER_TIMEOUT_SECONDS", "30")),
+    )
+    parser.add_argument(
+        "--collector-poll-initial-backoff-seconds",
+        type=float,
+        default=float(os.getenv("SIMULATION_COLLECTOR_POLL_INITIAL_BACKOFF_SECONDS", "0.1")),
+    )
+    parser.add_argument(
+        "--collector-poll-max-backoff-seconds",
+        type=float,
+        default=float(os.getenv("SIMULATION_COLLECTOR_POLL_MAX_BACKOFF_SECONDS", "2")),
+    )
+    parser.add_argument(
         "--report-path",
         default=os.getenv(
             "SIMULATION_REPORT_PATH",
@@ -863,6 +922,9 @@ def main(argv: list[str] | None = None) -> int:
             order_quantity=args.order_quantity,
             seed=args.seed,
             request_timeout_seconds=args.request_timeout_seconds,
+            collector_barrier_timeout_seconds=args.collector_barrier_timeout_seconds,
+            collector_poll_initial_backoff_seconds=args.collector_poll_initial_backoff_seconds,
+            collector_poll_max_backoff_seconds=args.collector_poll_max_backoff_seconds,
             report_path=args.report_path,
             run_id=args.run_id,
         )
