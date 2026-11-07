@@ -70,7 +70,7 @@ class JsonlEventStore:
         needs_separator = False
         with self.events_path.open("r", encoding="utf-8") as stream:
             for line_number, line in enumerate(stream, start=1):
-                needs_separator = not line.endswith("\\n")
+                needs_separator = not line.endswith("\n")
                 try:
                     stored = json.loads(line)
                     event = RawEvent.model_validate(stored["event"])
@@ -88,7 +88,7 @@ class JsonlEventStore:
                         (
                             {
                                 "line_number": line_number,
-                                "raw_line": line.rstrip("\\n"),
+                                "raw_line": line.rstrip("\n"),
                             },
                             f"recovery_error: {type(exc).__name__}: {exc}",
                         )
@@ -97,7 +97,7 @@ class JsonlEventStore:
             # Preserve an incomplete final record; append only a delimiter so
             # the next valid event cannot be concatenated onto the bad bytes.
             with self.events_path.open("a", encoding="utf-8") as stream:
-                stream.write("\\n")
+                stream.write("\n")
                 stream.flush()
                 os.fsync(stream.fileno())
         for payload, reason in invalid:
