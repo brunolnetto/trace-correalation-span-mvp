@@ -53,6 +53,7 @@ class InventoryReceiptRequest(BaseModel):
 class InventoryAdjustmentRequest(BaseModel):
     quantity_delta: int = Field(ne=0)
     reason: str = Field(min_length=1, max_length=256)
+    idempotency_key: str = Field(min_length=1, max_length=128)
 
 
 class InventoryStore:
@@ -68,6 +69,7 @@ class InventoryStore:
         self._balances: dict[int, dict[str, int]] = {}
         self._reservations: dict[str, dict[str, Any]] = {}
         self._receipts: dict[str, dict[str, Any]] = {}
+        self._adjustments: dict[str, dict[str, Any]] = {}
         self._movements: list[dict[str, Any]] = []
         self._next_product_id = 1
         self._lock = asyncio.Lock()
@@ -264,8 +266,19 @@ class InventoryStore:
     async def adjust_stock(
         self, product_id: int, request: InventoryAdjustmentRequest
     ) -> dict[str, Any]:
+        adjustment_key = f"{product_id}:{request.idempotency_key}"
         async with self._lock:
             self._require_product_locked(product_id)
+            existing = self._adjustments.get(adjustment_key)
+            if existing is not None:
+                same_request = (
+                    existing["quantity_delta_on_hand"] == request.quantity_delta
+                    and existing["reference"] == request.reason
+                )
+                if not same_request:
+                    raise ValueError("Adjustment idempotency key was reused")
+                return existing.copy()
+
             balance = self._balances[product_id]
             adjusted_on_hand = balance["on_hand"] + request.quantity_delta
             if adjusted_on_hand < 0:
@@ -276,13 +289,16 @@ class InventoryStore:
                 )
 
             balance["on_hand"] = adjusted_on_hand
-            return self._append_movement_locked(
+            movement = self._append_movement_locked(
                 product_id=product_id,
                 movement_type="adjustment",
                 quantity_delta_on_hand=request.quantity_delta,
                 quantity_delta_reserved=0,
                 reference=request.reason,
+                idempotency_key=request.idempotency_key,
             )
+            self._adjustments[adjustment_key] = movement
+            return movement.copy()
 
     async def reserve(
         self, product_id: int, request: InventoryReservationRequest
@@ -361,10 +377,7 @@ class InventoryStore:
         async with self._lock:
             reservation = self._reservations.get(reservation_id)
             if reservation is None:
-                return {
-                    "reservation_id": reservation_id,
-                    "status": "not_found",
-                }
+                raise KeyError(f"Reservation {reservation_id} does not exist")
             if reservation["status"] == "committed":
                 return reservation.copy()
             if reservation["status"] != "reserved":
@@ -407,5 +420,6 @@ class InventoryStore:
             self._balances.clear()
             self._reservations.clear()
             self._receipts.clear()
+            self._adjustments.clear()
             self._movements.clear()
             self._next_product_id = 1
