@@ -79,6 +79,10 @@ async def test_catalog_create_list_update_and_duplicate_sku():
     assert response.status_code == 201
     product_id = response.json()["product_id"]
     assert response.json()["sku"] == "API-001"
+    empty_inventory = await request("GET", f"/inventory/{product_id}")
+    assert empty_inventory.json()["on_hand"] == 0
+    assert empty_inventory.json()["available_quantity"] == 0
+    assert empty_inventory.json()["available"] is False
 
     duplicate = await request(
         "POST",
@@ -141,6 +145,8 @@ async def test_receipt_reservation_release_and_inventory_projection():
     assert snapshot.json()["on_hand"] == 14
     assert snapshot.json()["reserved"] == 6
     assert snapshot.json()["available_quantity"] == 8
+    assert snapshot.json()["available"] is True
+    assert snapshot.json()["quantity"] == 8
 
     released = await request(
         "DELETE",
@@ -184,3 +190,7 @@ async def test_inventory_commit_reduces_on_hand_and_excludes_reserved():
     assert committed.json()["status"] == "committed"
     snapshot = await request("GET", f"/inventory/{product_id}")
     assert (snapshot.json()["on_hand"], snapshot.json()["reserved"]) == (6, 0)
+    missing_commit = await request(
+        "POST", "/inventory/reservations/not-a-reservation/commit"
+    )
+    assert missing_commit.status_code == 404
