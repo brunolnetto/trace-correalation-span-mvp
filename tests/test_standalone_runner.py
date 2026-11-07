@@ -14,6 +14,7 @@ def _scenario_transport(
     *,
     opening_stock: int = 42,
     reject_order_number: int | None = None,
+    omit_event_names: set[str] | None = None,
 ) -> tuple[httpx.MockTransport, dict[str, Any]]:
     state: dict[str, Any] = {
         "on_hand": opening_stock,
@@ -28,6 +29,8 @@ def _scenario_transport(
     }
 
     def emit_event(correlation_id: str, event_name: str) -> None:
+        if omit_event_names and event_name in omit_event_names:
+            return
         event_id = f"service-event-{len(state['collector_events']) + 1}"
         state["collector_events"].append(
             {
@@ -206,7 +209,10 @@ def _scenario_transport(
                     emit_event(correlation_id or "", "supplier.purchase_order.received")
                 return httpx.Response(200, json=order.copy())
 
-        return httpx.Response(404, json={"detail": f"unexpected request {request.method} {host}{path}"})
+        return httpx.Response(
+            404,
+            json={"detail": f"unexpected request {request.method} {host}{path}"},
+        )
 
     return httpx.MockTransport(handler), state
 
@@ -306,3 +312,43 @@ async def test_standalone_scenario_stops_when_an_order_is_not_successful(
         == "inventory_rejected"
     )
     assert len(report["correlation_ids"]["orders"]) == 8
+
+
+@pytest.mark.asyncio
+async def test_standalone_scenario_fails_with_missing_collector_events_in_report(
+    tmp_path: Path,
+):
+    transport, _ = _scenario_transport(
+        omit_event_names={"inventory.stock.received"}
+    )
+    report_path = tmp_path / "collector-timeout-report.json"
+    config = RunnerConfig(
+        order_api_url="http://order-api",
+        inventory_api_url="http://inventory-api",
+        supplier_api_url="http://supplier-api",
+        event_collector_url="http://event-collector",
+        collector_barrier_timeout_seconds=0.01,
+        collector_poll_initial_backoff_seconds=0.002,
+        collector_poll_max_backoff_seconds=0.004,
+        report_path=str(report_path),
+        run_id="collector-timeout-run",
+    )
+
+    with pytest.raises(ScenarioError, match="inventory.stock.received"):
+        await run_scenario(config, transport=transport)
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    barrier = report["collector_barrier"]
+    assert report["status"] == "failed"
+    assert barrier["status"] == "timeout"
+    assert barrier["observed_count"] == 66
+    assert barrier["expected_count"] == 67
+    assert barrier["missing"] == [
+        {
+            "correlation_id": report["correlation_ids"]["supplier"],
+            "event_name": "inventory.stock.received",
+            "expected": 1,
+            "observed": 0,
+            "missing": 1,
+        }
+    ]
