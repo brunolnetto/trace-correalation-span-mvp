@@ -17,7 +17,6 @@ PAYMENT_DECLINE_ABOVE = float(os.getenv("PAYMENT_DECLINE_ABOVE", "1000"))
 class ProcessOrderRequest(BaseModel):
     product_id: int = Field(gt=0)
     quantity: int = Field(default=1, gt=0)
-    amount: float = Field(gt=0, allow_inf_nan=False)
 
 
 class PaymentDeclined(Exception):
