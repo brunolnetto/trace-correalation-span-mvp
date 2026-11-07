@@ -192,7 +192,7 @@ Start the normal Compose services, then run a seeded random batch:
 
 ```bash
 docker compose up --build --detach
-docker compose --profile simulation run --rm order-generator
+docker compose --profile simulation run --build --rm order-generator
 ```
 
 The generator writes one JSON event per attempted order and a final summary to
@@ -205,7 +205,7 @@ For a deterministic three-scenario check against the Compose demo product
 (product 7, seeded with 42 units and priced at 99.90), run:
 
 ```bash
-docker compose --profile simulation run --rm order-generator python -m app.order_generator --mode coverage
+docker compose --profile simulation run --build --rm order-generator python -m app.order_generator --mode coverage
 ```
 
 The coverage mode expects one processed order (quantity 2), one payment
