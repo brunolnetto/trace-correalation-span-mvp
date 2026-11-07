@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
 class RawEvent(BaseModel):
@@ -82,7 +82,7 @@ class JsonlEventStore:
                             f"event_id {event_id} has conflicting persisted payloads"
                         )
                     self._hashes[event_id] = fingerprint
-                except Exception as exc:  # malformed historical lines are preserved
+                except (json.JSONDecodeError, KeyError, TypeError, ValidationError, EventIdentityConflict) as exc:  # malformed historical lines are preserved
                     invalid.append(
                         (
                             {
@@ -167,32 +167,41 @@ class JsonlEventStore:
             "reason": reason,
             "payload": payload,
         }
-        with self._lock:
-            with self.quarantine_path.open("a", encoding="utf-8") as stream:
-                stream.write(
-                    json.dumps(
-                        record,
-                        ensure_ascii=False,
-                        sort_keys=True,
-                        separators=(",", ":"),
-                        default=str,
-                    )
-                    + "\n"
+        with self._lock, self.quarantine_path.open("a", encoding="utf-8") as stream:
+            stream.write(
+                json.dumps(
+                    record,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
                 )
-                stream.flush()
-                os.fsync(stream.fileno())
+                + "\\n"
+            )
+            stream.flush()
+            os.fsync(stream.fileno())
 
     def list_events(self, *, limit: int = 100) -> list[dict[str, Any]]:
         if not self.events_path.exists():
             return []
-        with self._lock:
-            with self.events_path.open("r", encoding="utf-8") as stream:
-                return list(
-                    deque(
-                        (json.loads(line) for line in stream if line.strip()),
-                        maxlen=limit,
-                    )
-                )[::-1]
+        with self._lock, self.events_path.open("r", encoding="utf-8") as stream:
+            return list(
+                deque(
+                    (json.loads(line) for line in stream if line.strip()),
+                    maxlen=limit,
+                )
+            )[::-1]
+
+    def list_quarantine(self, *, limit: int = 100) -> list[dict[str, Any]]:
+        if not self.quarantine_path.exists():
+            return []
+        with self._lock, self.quarantine_path.open("r", encoding="utf-8") as stream:
+            return list(
+                deque(
+                    (json.loads(line) for line in stream if line.strip()),
+                    maxlen=limit,
+                )
+            )[::-1]
 
     def get_event(self, event_id: UUID) -> dict[str, Any] | None:
         for record in self.list_events(limit=10_000):
