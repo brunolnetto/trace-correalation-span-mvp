@@ -29,6 +29,10 @@ with inventory_events as (
         'inventory.reservation.released',
         'inventory.reservation.committed'
     )
+      and (
+          event_name <> 'inventory.reservation.released'
+          or json_extract_string(attributes, '$.status') = 'released'
+      )
 ),
 
 classified as (
