@@ -6,9 +6,11 @@ import pytest
 from app.order_generator.generator import (
     GeneratorConfig,
     OrderAttempt,
+    build_generator_events,
     build_plan,
     classify_response,
     execute_plan,
+    publish_generator_events,
     summarize,
 )
 
@@ -192,3 +194,85 @@ async def test_execute_plan_records_transport_errors_without_aborting_run():
         "processed",
     ]
     assert attempts[0].error.startswith("ConnectError:")
+
+
+def test_generator_run_id_and_events_are_stable_and_correlated():
+    config = GeneratorConfig(
+        mode="coverage",
+        seed=42,
+        product_id=7,
+        first_order_id=200,
+    )
+    plan = build_plan(config)
+    attempts = [
+        OrderAttempt(
+            order_id=command.order_id,
+            product_id=command.product_id,
+            quantity=command.quantity,
+            correlation_id=command.correlation_id,
+            scenario=command.scenario,
+            expected_outcome=command.expected_outcome,
+            outcome=command.expected_outcome or "processed",
+            http_status=201,
+            latency_ms=1.0,
+        )
+        for command in plan
+    ]
+    summary = summarize(config, plan, attempts)
+    events = build_generator_events(config, attempts, summary)
+
+    assert config.run_id == GeneratorConfig(
+        mode="coverage",
+        seed=42,
+        product_id=7,
+        first_order_id=200,
+    ).run_id
+    assert len(events) == 4
+    assert {event["event_name"] for event in events} == {
+        "order_generator.attempt",
+        "order_generator.summary",
+    }
+    attempt_events = [
+        event for event in events
+        if event["event_name"] == "order_generator.attempt"
+    ]
+    assert {
+        event["correlation_id"] for event in attempt_events
+    } == {command.correlation_id for command in plan}
+    assert {
+        event["attributes"]["run_id"] for event in attempt_events
+    } == {config.run_id}
+
+
+@pytest.mark.asyncio
+async def test_generator_event_publisher_posts_batches_to_collector():
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        payload = request.read()
+        batch_size = len(__import__("json").loads(payload)["events"])
+        return httpx.Response(
+            202,
+            json={
+                "accepted": batch_size,
+                "duplicates": 0,
+                "conflicts": 0,
+                "quarantined": 0,
+            },
+        )
+
+    events = [
+        {"event_id": f"event-{index}"}
+        for index in range(501)
+    ]
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="http://collector.test",
+    ) as client:
+        result = await publish_generator_events(client, events)
+
+    assert result == {"accepted": 501, "duplicates": 0}
+    assert len(requests) == 2
+    assert len(__import__("json").loads(requests[0].read())["events"]) == 500
+    assert len(__import__("json").loads(requests[1].read())["events"]) == 1
