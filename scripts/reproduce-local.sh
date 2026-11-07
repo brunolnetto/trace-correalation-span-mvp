@@ -196,6 +196,8 @@ assert process["correlation_id"] == process_id, process
 assert process["saga_id"], process
 assert process["reservation_id"], process
 assert process["payment_id"], process
+assert process["unit_price"] == "99.90", process
+assert process["total_amount"] == "199.80", process
 assert decline["detail"] == (
     "Payment declined; completed actions were compensated."
 ), decline
