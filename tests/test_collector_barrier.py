@@ -114,7 +114,7 @@ async def test_barrier_timeout_reports_missing_correlation_and_event_names():
     assert result["status"] == "timeout"
     assert result["observed_count"] == 0
     assert result["completed_at"] is None
-    assert len(result["missing"]) == 11
+    assert len(result["missing"]) == len(expected)
     assert {
         (item["correlation_id"], item["event_name"])
         for item in result["missing"]
