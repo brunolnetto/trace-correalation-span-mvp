@@ -51,7 +51,12 @@ class InventoryDouble:
                     "quantity": available,
                 },
             )
-        if request.method == "POST" and len(parts) == 3 and parts[0] == "inventory" and parts[2] == "receipts":
+        if (
+            request.method == "POST"
+            and len(parts) == 3
+            and parts[0] == "inventory"
+            and parts[2] == "receipts"
+        ):
             self.receipt_calls += 1
             product_id = int(parts[1])
             payload = __import__("json").loads(request.content)
