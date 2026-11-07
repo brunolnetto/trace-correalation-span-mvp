@@ -217,24 +217,30 @@ async def _run_generator_batch(
         or attempt.http_status != 201
         or attempt.error is not None
     ]
-    if len(attempts) != count or unexpected:
-        raise ScenarioError(
-            f"{batch_name}: expected {count} successful HTTP 201 orders; "
-            f"attempted {len(attempts)}; unexpected outcomes: {unexpected}"
-        )
-
     events = build_generator_events(
         generator_config,
         attempts,
         summary,
         run_id=execution_id,
     )
-    async with _make_client(
-        config.event_collector_url,
-        config.request_timeout_seconds,
-        transport,
-    ) as collector_client:
-        delivery = await publish_generator_events(collector_client, events)
+    try:
+        async with _make_client(
+            config.event_collector_url,
+            config.request_timeout_seconds,
+            transport,
+        ) as collector_client:
+            delivery = await publish_generator_events(collector_client, events)
+        collector_delivery = {
+            "status": "delivered",
+            "event_count": len(events),
+            **delivery,
+        }
+    except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+        collector_delivery = {
+            "status": "failed",
+            "event_count": len(events),
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
     return {
         "batch": batch_name,
@@ -242,6 +248,9 @@ async def _run_generator_batch(
         "plan_id": generator_config.plan_id,
         "planned": len(plan),
         "attempted": len(attempts),
+        "exit_code": summary["exit_code"],
+        "generator_summary": summary,
+        "unexpected_outcomes": unexpected,
         "outcomes": {
             "processed": summary["processed"],
             "payment_declined": summary["payment_declined"],
@@ -255,14 +264,11 @@ async def _run_generator_batch(
                 "outcome": attempt.outcome,
                 "http_status": attempt.http_status,
                 "latency_ms": attempt.latency_ms,
+                "error": attempt.error,
             }
             for attempt in attempts
         ],
-        "collector_delivery": {
-            "status": "delivered",
-            "event_count": len(events),
-            **delivery,
-        },
+        "collector_delivery": collector_delivery,
     }
 
 
@@ -400,6 +406,21 @@ async def run_scenario(
             report["correlation_ids"]["orders"].extend(
                 order["correlation_id"] for order in first_batch["orders"]
             )
+            if (
+                first_batch["attempted"] != config.first_batch_count
+                or first_batch["unexpected_outcomes"]
+            ):
+                raise ScenarioError(
+                    f"orders-first-batch: expected {config.first_batch_count} "
+                    f"successful HTTP 201 orders; attempted "
+                    f"{first_batch['attempted']}; unexpected outcomes: "
+                    f"{first_batch['unexpected_outcomes']}"
+                )
+            if first_batch["collector_delivery"]["status"] != "delivered":
+                raise ScenarioError(
+                    "orders-first-batch generator events were not accepted "
+                    f"by the Event Collector: {first_batch['collector_delivery']}"
+                )
 
             after_first = await _request_json(
                 inventory,
@@ -503,6 +524,21 @@ async def run_scenario(
             report["correlation_ids"]["orders"].extend(
                 order["correlation_id"] for order in second_batch["orders"]
             )
+            if (
+                second_batch["attempted"] != config.second_batch_count
+                or second_batch["unexpected_outcomes"]
+            ):
+                raise ScenarioError(
+                    f"orders-second-batch: expected {config.second_batch_count} "
+                    f"successful HTTP 201 orders; attempted "
+                    f"{second_batch['attempted']}; unexpected outcomes: "
+                    f"{second_batch['unexpected_outcomes']}"
+                )
+            if second_batch["collector_delivery"]["status"] != "delivered":
+                raise ScenarioError(
+                    "orders-second-batch generator events were not accepted "
+                    f"by the Event Collector: {second_batch['collector_delivery']}"
+                )
 
             after_second = await _request_json(
                 inventory,
