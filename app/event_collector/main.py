@@ -8,7 +8,6 @@ from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, Field, ValidationError
 
 from app.event_collector.store import (
-    EventIdentityConflict,
     JsonlEventStore,
     RawEvent,
 )
