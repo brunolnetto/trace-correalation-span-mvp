@@ -397,6 +397,48 @@ DuckDB database in a separate `analytics-data` volume. If the collector volume
 is empty, dbt uses the included fixture dataset. For model details and local
 commands see [analytics/README.md](analytics/README.md).
 
+## Standalone simulation and analytics
+
+Run the deterministic order-to-replenishment scenario followed by the existing
+dbt build as one finite Compose workload:
+
+```bash
+docker compose --profile standalone up --build \
+  --abort-on-container-exit \
+  --exit-code-from analytics-runner
+```
+
+Compose starts the Order API, Inventory API, Supplier Simulator, Event
+Collector, and Jaeger first. The Simulation Runner executes the scenario and
+waits for its run-scoped events to be durably visible through the Collector.
+The Analytics Runner starts only after successful Simulation Runner completion
+and returns the dbt build outcome.
+
+The run writes `simulation-report.json` to the `run-state` volume and
+`run-report.json`, the DuckDB database, and dbt artifacts to
+`analytics-data`. Inspect the reports with:
+
+```bash
+docker compose run --rm --no-deps \
+  --entrypoint cat simulation-runner \
+  /run-state/simulation-report.json
+
+docker compose --profile standalone run --rm --no-deps \
+  --entrypoint cat analytics-runner \
+  /analytics-data/run-report.json
+```
+
+To reset all persisted local data and start from the demo opening balance:
+
+```bash
+docker compose down -v
+```
+
+**Warning:** `down -v` deletes the Collector event history, simulation and
+analytics reports, DuckDB database, and all other named-volume data. For
+configuration, scenario invariants, failure semantics, and report details, see
+[the standalone execution guide](docs/standalone-execution.md).
+
 ## Reproduce locally (recommended)
 
 Requirements: Docker Engine, Docker Compose v2, `uv`, and `curl`. The script
