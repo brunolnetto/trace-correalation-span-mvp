@@ -329,12 +329,39 @@ docker compose --profile simulation run --build --no-deps --rm order-generator \
   > "$TMP_DIR/generator.log"
 
 echo "==> 6/7: Verify JSON logs, Saga traces, and raw event collection"
-TRACE_URL="$JAEGER_URL/api/traces?service=order-api&limit=50&lookback=1h"
+docker compose logs --no-log-prefix --no-color order-api inventory-api > "$TMP_DIR/service.log"
+
+# Resolve the exact trace from the declined request's correlation ID. Querying
+# Jaeger's first N traces is lossy because generator/collector traffic can push
+# the manual saga trace out of the capped result set.
+DECLINE_TRACE_ID="$(python3 - "$TMP_DIR/service.log" "$DECLINE_CORRELATION_ID" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path, correlation_id = sys.argv[1:]
+for line in Path(path).read_text().splitlines():
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if (
+        record.get("correlation_id") == correlation_id
+        and record.get("message") == "order.process.failed"
+        and record.get("trace_id")
+    ):
+        print(record["trace_id"])
+        break
+PY
+)"
+[[ -n "$DECLINE_TRACE_ID" ]] || die "Could not resolve trace ID for declined order $DECLINE_CORRELATION_ID"
+
+TRACE_URL="$JAEGER_URL/api/traces/$DECLINE_TRACE_ID"
 TRACE_FOUND=0
 deadline=$((SECONDS + WAIT_SECONDS))
 while (( SECONDS < deadline )); do
-  if curl --silent --show-error --fail "$TRACE_URL" -o "$TMP_DIR/traces.json"; then
-    if python3 - "$TMP_DIR/traces.json" <<'PY'
+  if curl --silent --show-error --fail "$TRACE_URL" -o "$TMP_DIR/trace.json"; then
+    if python3 - "$TMP_DIR/trace.json" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -361,13 +388,11 @@ PY
 done
 
 if (( ! TRACE_FOUND )); then
-  echo "Jaeger did not return the expected compensation trace." >&2
+  echo "Jaeger did not return the expected compensation trace $DECLINE_TRACE_ID." >&2
   docker compose logs --tail=150 >&2 || true
-  die "Trace validation failed; inspect $JAEGER_URL"
+  die "Trace validation failed; inspect $TRACE_URL"
 fi
-echo "    Jaeger contains a cross-service reservation + compensation trace"
-
-docker compose logs --no-log-prefix --no-color order-api inventory-api > "$TMP_DIR/service.log"
+echo "    Jaeger contains declined-order trace $DECLINE_TRACE_ID with cross-service reservation + compensation"
 python3 - "$TMP_DIR/service.log" "$PROCESS_CORRELATION_ID" \
   "$DECLINE_CORRELATION_ID" "$INSUFFICIENT_CORRELATION_ID" <<'PY'
 import json
