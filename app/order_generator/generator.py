@@ -104,6 +104,7 @@ class OrderAttempt:
     latency_ms: float
     response: dict[str, Any] | None = None
     error: str | None = None
+    attempted_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -189,6 +190,7 @@ async def execute_plan(
 
     for command in plan:
         started_at = time.perf_counter()
+        attempted_at = datetime.now(UTC).isoformat()
         try:
             response = await client.post(
                 f"/orders/{command.order_id}/process",
@@ -213,6 +215,7 @@ async def execute_plan(
                     http_status=response.status_code,
                     latency_ms=round(elapsed_ms, 3),
                     response=payload,
+                    attempted_at=attempted_at,
                     error=(
                         "Response body was not a JSON object"
                         if payload is None
@@ -234,6 +237,7 @@ async def execute_plan(
                     http_status=None,
                     latency_ms=round(elapsed_ms, 3),
                     error=f"{type(exc).__name__}: {exc}",
+                    attempted_at=attempted_at,
                 )
             )
 
@@ -325,7 +329,7 @@ def build_generator_events(
     events: list[dict[str, Any]] = []
     for attempt in attempts:
         source = {
-            "timestamp": datetime.now(UTC).isoformat(),
+            "timestamp": attempt.attempted_at or datetime.now(UTC).isoformat(),
             "level": "INFO",
             "service": "order-generator",
             "logger": "app.order_generator",
