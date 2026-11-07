@@ -105,14 +105,19 @@ async def wait_for_collector_events(
     assessment = assess_events([], expected)
 
     while True:
+        remaining = timeout_seconds - (monotonic() - started)
+        if remaining <= 0:
+            break
+
         attempts += 1
         try:
-            response = await client.get(
-                "/v1/events?limit=10000",
-                headers={"X-Correlation-ID": correlation_id},
-            )
-            response.raise_for_status()
-            payload = response.json()
+            async with asyncio.timeout(remaining):
+                response = await client.get(
+                    "/v1/events?limit=10000",
+                    headers={"X-Correlation-ID": correlation_id},
+                )
+                response.raise_for_status()
+                payload = response.json()
             records = payload.get("events")
             if not isinstance(records, list):
                 raise ValueError("Collector response has no events list")
@@ -128,19 +133,21 @@ async def wait_for_collector_events(
                     "completed_at": datetime.now(UTC).isoformat(),
                     "last_error": None,
                 }
-        except (httpx.HTTPError, ValueError) as exc:
+        except (httpx.HTTPError, ValueError, TimeoutError) as exc:
             last_error = f"{type(exc).__name__}: {exc}"
 
-        elapsed = monotonic() - started
-        remaining = timeout_seconds - elapsed
+        remaining = timeout_seconds - (monotonic() - started)
         if remaining <= 0:
-            return {
-                "status": "timeout",
-                **assessment,
-                "poll_attempts": attempts,
-                "elapsed_seconds": round(elapsed, 3),
-                "completed_at": None,
-                "last_error": last_error,
-            }
+            break
         await asyncio.sleep(min(backoff, remaining))
         backoff = min(backoff * 2, max_backoff_seconds)
+
+    elapsed = monotonic() - started
+    return {
+        "status": "timeout",
+        **assessment,
+        "poll_attempts": attempts,
+        "elapsed_seconds": round(elapsed, 3),
+        "completed_at": None,
+        "last_error": last_error,
+    }
