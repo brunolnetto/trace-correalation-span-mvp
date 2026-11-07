@@ -132,7 +132,7 @@ class JsonlEventStore:
                                 sort_keys=True,
                                 separators=(",", ":"),
                             )
-                            + "\\n"
+                            + "\n"
                         )
                     stream.flush()
                     os.fsync(stream.fileno())
