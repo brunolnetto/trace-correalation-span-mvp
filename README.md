@@ -477,12 +477,13 @@ uv run pytest
 uv run ruff check .
 ```
 
-The tests cover correlation ID preservation, generation, invalid/oversized
-input replacement, JSON log fields, W3C trace-context round trips, concurrent
-saga context isolation, explicit product creation, duplicate SKU rejection,
-idempotent receipts, inventory ledger entries, reservation/release/commit
-semantics, adjustment invariants, oversell prevention, order processing, and
-compensation behavior.
+The tests cover correlation ID preservation, W3C trace-context propagation,
+concurrent Saga context isolation, product/catalog and inventory invariants,
+idempotent receipts and reservations, oversell prevention, order processing
+and compensation, deterministic generator plans and publication, supplier
+onboarding/replenishment/lead-time behavior, and raw event schema validation,
+append durability, replay deduplication, and quarantine. CI also builds the
+dbt project against its versioned fixture dataset.
 
 ## Scope and limitations
 
