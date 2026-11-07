@@ -131,3 +131,34 @@ def test_malformed_persisted_line_is_preserved_and_quarantined_on_recovery(
     quarantined = store.list_quarantine()
     assert len(quarantined) == 1
     assert "recovery_error" in quarantined[0]["reason"]
+
+\n\ndef test_batch_deduplicates_repeated_id_within_the_same_request(tmp_path: Path):
+    store = JsonlEventStore(
+        tmp_path / "events.jsonl",
+        tmp_path / "quarantine.jsonl",
+    )
+    event = make_event()
+
+    result = store.append_batch([event, event])
+
+    assert result["accepted"] == 1
+    assert result["duplicates"] == 1
+    assert len(store.list_events()) == 1
+
+
+def test_recovery_separates_incomplete_final_record_before_next_append(
+    tmp_path: Path,
+):
+    events_path = tmp_path / "events.jsonl"
+    quarantine_path = tmp_path / "quarantine.jsonl"
+    events_path.write_text('{"incomplete":', encoding="utf-8")
+
+    store = JsonlEventStore(events_path, quarantine_path)
+    store.append_batch([make_event()])
+    lines = events_path.read_text(encoding="utf-8").splitlines()
+
+    assert len(lines) == 2
+    assert json.loads(lines[1])["event"]["event_name"] == (
+        "order.process.completed"
+    )
+    assert len(store.list_quarantine()) == 1
