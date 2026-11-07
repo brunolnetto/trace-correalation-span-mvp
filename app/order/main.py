@@ -153,7 +153,9 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
             raise HTTPException(
                 status_code=500,
                 detail={
-                    "message": "Order processing failed and compensation is incomplete.",
+                    "message": (
+                        "Order processing failed and compensation is incomplete."
+                    ),
                     "saga_id": saga_id,
                     "incomplete_compensations": incomplete_compensations,
                 },
