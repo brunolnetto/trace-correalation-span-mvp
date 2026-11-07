@@ -194,3 +194,38 @@ async def test_inventory_commit_reduces_on_hand_and_excludes_reserved():
         "POST", "/inventory/reservations/not-a-reservation/commit"
     )
     assert missing_commit.status_code == 404
+
+
+
+@pytest.mark.asyncio
+async def test_adjustment_endpoint_is_idempotent_and_protects_reserved_stock():
+    product_id = await create_product(quantity=10)
+    payload = {
+        "quantity_delta": -2,
+        "reason": "damaged goods",
+        "idempotency_key": "stock-count-001",
+    }
+    first = await request(
+        "POST", f"/inventory/{product_id}/adjustments", json=payload
+    )
+    repeated = await request(
+        "POST", f"/inventory/{product_id}/adjustments", json=payload
+    )
+
+    assert first.status_code == 201
+    assert repeated.json()["movement_id"] == first.json()["movement_id"]
+    snapshot = await request("GET", f"/inventory/{product_id}")
+    assert snapshot.json()["on_hand"] == 8
+
+    rejected = await request(
+        "POST",
+        f"/inventory/{product_id}/adjustments",
+        json={
+            "quantity_delta": -9,
+            "reason": "invalid count",
+            "idempotency_key": "stock-count-002",
+        },
+    )
+    assert rejected.status_code == 409
+    snapshot = await request("GET", f"/inventory/{product_id}")
+    assert snapshot.json()["on_hand"] == 8
