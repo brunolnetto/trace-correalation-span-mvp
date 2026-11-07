@@ -132,7 +132,9 @@ class SupplierSimulation:
                 )
                 if product is None:
                     response.raise_for_status()
-                    raise RuntimeError("Catalog rejected onboarding without a matching SKU")
+                    raise RuntimeError(
+                        "Catalog rejected onboarding without a matching SKU"
+                    )
             else:
                 response.raise_for_status()
                 product = response.json()
