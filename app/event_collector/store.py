@@ -209,17 +209,6 @@ class JsonlEventStore:
                 return record
         return None
 
-    def list_quarantine(self, *, limit: int = 100) -> list[dict[str, Any]]:
-        if not self.quarantine_path.exists():
-            return []
-        with self._lock:
-            with self.quarantine_path.open("r", encoding="utf-8") as stream:
-                return list(
-                    deque(
-                        (json.loads(line) for line in stream if line.strip()),
-                        maxlen=limit,
-                    )
-                )[::-1]
 
     def stats(self) -> dict[str, int]:
         return {
