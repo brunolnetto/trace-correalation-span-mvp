@@ -4,7 +4,7 @@
 
 with raw_records as (
     select json as record_json
-    from read_ndjson_objects('{{ raw_events_path }}')
+    from read_ndjson_objects('{{ raw_events_path }}', ignore_errors = true)
 ),
 
 extracted as (
