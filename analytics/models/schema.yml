@@ -38,6 +38,9 @@ models:
                 - payment_declined
                 - inventory_rejected
                 - product_not_found
+                - product_inactive
+                - product_catalog_rejected
+                - product_catalog_unavailable
                 - inventory_service_error
                 - inventory_unavailable
                 - timeout
@@ -102,3 +105,41 @@ models:
                 - matched
                 - missing_service_events
                 - outcome_mismatch
+
+  - name: fct_supplier_replenishment_decisions
+    description: "Reorder policy evaluations and their explicit decisions."
+    columns:
+      - name: decision_event_id
+        tests:
+          - not_null
+          - unique
+      - name: product_id
+        tests:
+          - not_null
+      - name: decision
+        tests:
+          - accepted_values:
+              values:
+                - no_reorder
+                - open_purchase_order_exists
+                - purchase_order_created
+
+  - name: fct_supplier_purchase_orders
+    description: "Supplier purchase-order lifecycle reconstructed from service events."
+    columns:
+      - name: purchase_order_id
+        tests:
+          - not_null
+          - unique
+      - name: product_id
+        tests:
+          - not_null
+      - name: lifecycle_status
+        tests:
+          - accepted_values:
+              values:
+                - created
+                - ordered
+                - received
+                - cancelled
+                - unknown
