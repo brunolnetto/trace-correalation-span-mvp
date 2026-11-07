@@ -34,7 +34,7 @@ DUCKDB_PATH=target/trace_events.duckdb \
 dbt build --profiles-dir .
 ```
 
-Without a collector dataset, dbt uses `seeds/fixture_events.jsonl` as a small
+Without a collector dataset, dbt uses `fixtures/fixture_events.jsonl` as a small
 contract fixture. Set `RAW_EVENTS_PATH` to the collector file to model actual
 service events.
 
