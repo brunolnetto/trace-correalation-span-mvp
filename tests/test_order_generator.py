@@ -221,7 +221,11 @@ def test_generator_run_id_and_events_are_stable_and_correlated():
         for command in plan
     ]
     summary = summarize(config, plan, attempts)
-    events = build_generator_events(config, attempts, summary)
+    execution_id = "coverage-run-001"
+    events = build_generator_events(
+        config, attempts, summary, run_id=execution_id
+    )
+    second_execution = build_plan(config, execution_id="coverage-run-002")
 
     assert config.run_id == GeneratorConfig(
         mode="coverage",
@@ -243,7 +247,13 @@ def test_generator_run_id_and_events_are_stable_and_correlated():
     } == {command.correlation_id for command in plan}
     assert {
         event["attributes"]["run_id"] for event in attempt_events
-    } == {config.run_id}
+    } == {execution_id}
+    assert [command.quantity for command in second_execution] == [
+        command.quantity for command in plan
+    ]
+    assert {
+        command.correlation_id for command in second_execution
+    }.isdisjoint({command.correlation_id for command in plan})
 
 
 @pytest.mark.asyncio
