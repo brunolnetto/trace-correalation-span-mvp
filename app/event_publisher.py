@@ -75,7 +75,7 @@ class AsyncCollectorHandler(logging.Handler):
             self._queue.put_nowait(event)
         except queue.Full:
             self.dropped_events += 1
-        except Exception:
+        except (json.JSONDecodeError, KeyError, TypeError):
             self.handleError(record)
 
     def _take_batch(self) -> list[dict[str, Any]]:
