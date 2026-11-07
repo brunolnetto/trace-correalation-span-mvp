@@ -162,6 +162,7 @@ async def test_execute_plan_uses_order_api_and_propagates_correlation_id():
     )
     assert attempts[0].outcome == "processed"
     assert attempts[0].http_status == 201
+    assert attempts[0].attempted_at
     assert attempts[0].response["order_id"] == 123
 
 
