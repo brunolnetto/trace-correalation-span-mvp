@@ -45,6 +45,7 @@ models:
                 - inventory_unavailable
                 - timeout
                 - processing_error
+                - compensation_incomplete
                 - failed
                 - incomplete
 
