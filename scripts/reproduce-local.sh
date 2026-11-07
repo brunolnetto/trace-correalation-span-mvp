@@ -324,7 +324,7 @@ print("    insufficient-stock order rejected without changing inventory")
 PY
 
 echo "    running generator coverage and publishing attempts to raw storage"
-docker compose --profile simulation run --build --rm order-generator \
+docker compose --profile simulation run --build --no-deps --rm order-generator \
   python -m app.order_generator --mode coverage \
   > "$TMP_DIR/generator.log"
 
