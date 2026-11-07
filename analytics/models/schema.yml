@@ -12,7 +12,8 @@ models:
         tests:
           - not_null
           - accepted_values:
-              values: ["1.0"]
+              arguments:
+                values: ["1.0"]
       - name: occurred_at
         tests:
           - not_null
@@ -33,21 +34,22 @@ models:
       - name: outcome
         tests:
           - accepted_values:
-              values:
-                - processed
-                - payment_declined
-                - inventory_rejected
-                - product_not_found
-                - product_inactive
-                - product_catalog_rejected
-                - product_catalog_unavailable
-                - inventory_service_error
-                - inventory_unavailable
-                - timeout
-                - processing_error
-                - compensation_incomplete
-                - failed
-                - incomplete
+              arguments:
+                values:
+                  - processed
+                  - payment_declined
+                  - inventory_rejected
+                  - product_not_found
+                  - product_inactive
+                  - product_catalog_rejected
+                  - product_catalog_unavailable
+                  - inventory_service_error
+                  - inventory_unavailable
+                  - timeout
+                  - processing_error
+                  - compensation_incomplete
+                  - failed
+                  - incomplete
 
   - name: fct_inventory_movements
     description: "Movement deltas derived from explicit Inventory API log events."
@@ -62,12 +64,13 @@ models:
       - name: movement_type
         tests:
           - accepted_values:
-              values:
-                - receipt
-                - adjustment
-                - reservation_created
-                - reservation_released
-                - reservation_committed
+              arguments:
+                values:
+                  - receipt
+                  - adjustment
+                  - reservation_created
+                  - reservation_released
+                  - reservation_committed
 
   - name: fct_order_generator_attempts
     description: "Individual requests emitted by the deterministic order generator."
@@ -108,10 +111,11 @@ models:
       - name: reconciliation_status
         tests:
           - accepted_values:
-              values:
-                - matched
-                - missing_service_events
-                - outcome_mismatch
+              arguments:
+                values:
+                  - matched
+                  - missing_service_events
+                  - outcome_mismatch
 
   - name: fct_supplier_replenishment_decisions
     description: "Reorder policy evaluations and their explicit decisions."
@@ -126,10 +130,11 @@ models:
       - name: decision
         tests:
           - accepted_values:
-              values:
-                - no_reorder
-                - open_purchase_order_exists
-                - purchase_order_created
+              arguments:
+                values:
+                  - no_reorder
+                  - open_purchase_order_exists
+                  - purchase_order_created
 
   - name: fct_supplier_purchase_orders
     description: "Supplier purchase-order lifecycle reconstructed from service events."
@@ -144,9 +149,10 @@ models:
       - name: lifecycle_status
         tests:
           - accepted_values:
-              values:
-                - created
-                - ordered
-                - received
-                - cancelled
-                - unknown
+              arguments:
+                values:
+                  - created
+                  - ordered
+                  - received
+                  - cancelled
+                  - unknown
