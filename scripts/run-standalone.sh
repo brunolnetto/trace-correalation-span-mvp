@@ -121,11 +121,22 @@ else
   # was resolving service_completed_successfully for the Analytics Runner.
   "${COMPOSE[@]}" wait simulation-runner >/dev/null 2>&1 || true
   simulation_status="$(read_exit_code simulation-runner 2>/dev/null || true)"
-  show_diagnostics
 
   if [[ "$simulation_status" =~ ^[0-9]+$ ]] && (( simulation_status != 0 )); then
+    show_diagnostics
     exit "$simulation_status"
   fi
+
+  if [[ "$simulation_status" == "0" ]]; then
+    "${COMPOSE[@]}" wait analytics-runner >/dev/null 2>&1 || true
+    analytics_status="$(read_exit_code analytics-runner 2>/dev/null || true)"
+    if [[ "$analytics_status" =~ ^[0-9]+$ ]] && (( analytics_status != 0 )); then
+      show_diagnostics
+      exit "$analytics_status"
+    fi
+  fi
+
+  show_diagnostics
   exit "$up_status"
 fi
 
