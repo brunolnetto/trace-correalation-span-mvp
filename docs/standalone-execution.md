@@ -94,3 +94,23 @@ analytics job's status.
 - No replacement of the existing APIs or manual service workflows.
 - No claim of durable Supplier Simulator state: supplier policies and purchase orders
   remain process-local in this MVP.
+
+
+## Incremental implementation
+
+The first implementation slice is tracked by [issue #13](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/13). It adds a finite Simulation Runner that reuses the existing Order Generator library and the public Order, Inventory, Supplier Simulator, and Event Collector APIs.
+
+For a clean local run, remove the previous Compose containers and named volumes first. **This deletes the current raw-event data and run reports as well as any named-volume data:**
+
+```bash
+docker compose down -v
+docker compose --profile standalone up --build \
+  --abort-on-container-exit \
+  --exit-code-from simulation-runner
+```
+
+The Simulation Runner writes `simulation-report.json` to the `run-state` volume. The default scenario uses product 7, 42 opening units, eight initial two-unit orders, one 34-unit purchase order, four more two-unit orders during lead time, and a final inventory position of 52 after receipt.
+
+The runner validates the opening balance and rejects a run if the product has pre-existing reservations or an active purchase order. Each run gets a distinct run ID, order IDs, order correlation IDs, and one separate supplier correlation ID. Set `STANDALONE_RUN_ID` only when an explicitly controlled identifier is required; do not reuse it to rerun a scenario because the Order API in this MVP does not yet provide durable order-request idempotency.
+
+This is an intermediate milestone, not the final standalone command. The Collector completion barrier is tracked separately in [issue #14](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/14), and the finite Analytics Runner is tracked in [issue #15](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/15). The current runner publishes generator-attempt events to the Collector, but successful completion does not yet prove that all asynchronous service log events have been durably collected.
