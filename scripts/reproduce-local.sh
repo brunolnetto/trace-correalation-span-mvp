@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Reproduce the Saga + inventory + observability flow:
-# uv tests/lint -> build/start services -> catalog/stock setup ->
-# success + compensation + insufficient-stock scenarios -> trace/log checks.
+# Reproduce the catalog, order, supplier, raw-event and observability flow:
+# uv tests/lint -> start services -> order scenarios -> supplier replenishment ->
+# generator coverage -> Jaeger, JSON log and raw-event verification.
 #
 # Usage:
 #   ./scripts/reproduce-local.sh
@@ -65,7 +65,7 @@ uv run --python 3.12 pytest
 echo "==> 3/6: Run Ruff"
 uv run --python 3.12 ruff check .
 
-echo "==> 4/6: Build and start Jaeger plus both APIs"
+echo "==> 4/6: Build and start Jaeger, APIs, supplier, and event collector"
 docker compose up --build --detach
 
 wait_for_url() {
@@ -91,7 +91,7 @@ wait_for_url "$JAEGER_URL/" "Jaeger UI"
 wait_for_url "$EVENT_COLLECTOR_URL/healthz" "event-collector"
 wait_for_url "$SUPPLIER_URL/healthz" "supplier-simulator"
 
-echo "==> 5/6: Create product, receive stock, and exercise order scenarios"
+echo "==> 5/6: Exercise catalog, orders, and supplier replenishment"
 curl --silent --show-error --fail \
   --header "Content-Type: application/json" \
   --data '{"sku":"LOW-STOCK-001","name":"Low stock demo product","category":"demo","unit_price":"10.00"}' \
@@ -316,7 +316,7 @@ docker compose --profile simulation run --build --rm order-generator \
   python -m app.order_generator --mode coverage \
   > "$TMP_DIR/generator.log"
 
-echo "==> 6/6: Verify JSON logs and Saga traces in Jaeger"
+echo "==> 6/6: Verify JSON logs, Saga traces, and raw event collection"
 TRACE_URL="$JAEGER_URL/api/traces?service=order-api&limit=50&lookback=1h"
 TRACE_FOUND=0
 deadline=$((SECONDS + WAIT_SECONDS))
@@ -550,7 +550,7 @@ if (( ! COLLECTED )); then
   die "Raw event collector did not persist all expected scenario events"
 fi
 
-echo "SUCCESS: Catalog, inventory, Saga, and observability reproduction passed."
+echo "SUCCESS: Catalog, inventory, Saga, supplier, generator, and observability reproduction passed."
 echo "  Order API:     $ORDER_URL"
 echo "  Inventory API: $INVENTORY_URL"
 echo "  Jaeger UI:     $JAEGER_URL"
