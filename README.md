@@ -82,7 +82,9 @@ Inventory distinguishes physical stock from committed reservations:
 
 - `on_hand`: physical units in the inventory.
 - `reserved`: units allocated to orders but not yet physically issued.
-- `available`: `on_hand - reserved`, the amount that can be reserved.
+- `available_quantity`: `on_hand - reserved`, the amount that can be reserved.
+  The legacy `available` field remains a boolean indicating whether this
+  quantity is greater than zero.
 
 Reserving stock increases `reserved`, not decreases `on_hand`. Releasing a
 reservation decreases `reserved`. Committing a reservation decreases both
