@@ -30,6 +30,16 @@ with lifecycle_events as (
     )
 ),
 
+deduplicated_lifecycle_events as (
+    select
+        *,
+        row_number() over (
+            partition by purchase_order_id, event_name
+            order by occurred_at, event_id
+        ) as event_occurrence
+    from lifecycle_events
+),
+
 purchase_orders as (
     select
         purchase_order_id,
@@ -63,8 +73,9 @@ purchase_orders as (
         max(lead_time_seconds) as lead_time_seconds,
         max(receipt_id) as receipt_id,
         count(*) as lifecycle_event_count
-    from lifecycle_events
-    where purchase_order_id is not null
+    from deduplicated_lifecycle_events
+    where event_occurrence = 1
+      and purchase_order_id is not null
       and (
           event_name <> 'supplier.replenishment.evaluated'
           or json_extract_string(attributes, '$.decision')
