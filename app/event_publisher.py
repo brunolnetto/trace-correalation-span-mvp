@@ -69,6 +69,13 @@ class AsyncCollectorHandler(logging.Handler):
         self._worker.start()
 
     def emit(self, record: logging.LogRecord) -> None:
+        # HTTPX emits an INFO record for each Collector POST. Forwarding that
+        # record through this same handler would recursively publish another
+        # POST forever. Keep transport diagnostics on stdout, but do not send
+        # them back into the Collector.
+        if record.name == "httpx" or record.name.startswith("httpx."):
+            return
+
         try:
             source = json.loads(self._formatter.format(record))
             event = build_event_envelope(source)
