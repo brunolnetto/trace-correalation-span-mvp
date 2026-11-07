@@ -223,6 +223,64 @@ The defaults can be overridden through CLI flags or environment variables:
 `ORDER_GENERATOR_SUCCESS_QUANTITY`, `ORDER_GENERATOR_DECLINE_QUANTITY`, and
 `ORDER_GENERATOR_INSUFFICIENT_QUANTITY` overrides.
 
+## Supplier onboarding and replenishment simulation
+
+The Supplier Simulation API is exposed on port 18002. Its fixture catalog
+contains deterministic supplier offers. Onboarding creates a product through
+the Inventory API and installs a default reorder policy:
+
+```bash
+curl http://localhost:18002/supplier-catalog
+curl -X POST http://localhost:18002/supplier-catalog/BEANS-250/onboard
+```
+
+A policy defines `reorder_point`, `target_stock`, and
+`lead_time_seconds`. Replenishment evaluates inventory position as:
+
+```text
+inventory_position = on_hand - reserved + on_order
+```
+
+When inventory position is at or below the reorder point, the simulator creates
+one purchase order for `target_stock - inventory_position` units. An existing
+created or ordered PO suppresses duplicate reorder decisions. This accounts
+for already-committed reservations without treating them as available units.
+
+Evaluate all configured policies or just one product:
+
+```bash
+curl -X POST http://localhost:18002/replenishments/evaluate
+curl -X POST 'http://localhost:18002/replenishments/evaluate?product_id=8'
+```
+
+Purchase orders follow `created -> ordered -> received` or
+`created -> cancelled`. Ordering records a due time based on the policy's
+lead time. The simulation clock can be advanced explicitly, so tests do not
+sleep while waiting for supplier deliveries:
+
+```bash
+curl -X POST http://localhost:18002/purchase-orders/<po-id>/order
+curl -X POST http://localhost:18002/clock/advance \
+  -H 'Content-Type: application/json' -d '{"seconds":3600}'
+curl -X POST http://localhost:18002/purchase-orders/<po-id>/receive
+```
+
+Receiving sends an idempotent receipt to Inventory API using
+`supplier-po:<purchase_order_id>`. Replaying a receive after a supplier
+simulator restart can therefore safely replay the same inventory receipt,
+provided the purchase order record is restored; supplier policies and PO
+records themselves remain process-local in this MVP.
+
+Run the full supplier stack with:
+
+```bash
+docker compose up --build --detach
+```
+
+The supplier service uses the Inventory API as the sole stock system of record.
+It never changes balances directly and does not use adjustments to simulate
+supplier deliveries.
+
 ## JSON logs
 
 Each service writes one JSON object per log event to stdout. Example fields:
