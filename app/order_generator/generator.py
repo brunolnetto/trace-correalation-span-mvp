@@ -400,6 +400,7 @@ def emit_events(
                 {
                     "event": "order_generator.attempt",
                     "run_id": effective_run_id,
+                    "plan_id": config.plan_id,
                     "mode": config.mode,
                     "seed": config.seed,
                     **attempt.to_dict(),
