@@ -357,7 +357,7 @@ import json
 import sys
 from pathlib import Path
 
-path, process_id, decline_id, insufficient_id, supplier_id = sys.argv[1:]
+path, process_id, decline_id, insufficient_id = sys.argv[1:]
 records = []
 for line in Path(path).read_text().splitlines():
     try:
