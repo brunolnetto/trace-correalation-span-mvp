@@ -3,10 +3,10 @@
 select
     cast(started_at as date) as order_date,
     count(*) as attempted_orders,
-    countif(outcome = 'processed') as processed_orders,
-    countif(outcome = 'payment_declined') as payment_declined_orders,
-    countif(outcome = 'inventory_rejected') as inventory_rejected_orders,
-    countif(outcome not in (
+    count(*) filter (where outcome = 'processed') as processed_orders,
+    count(*) filter (where outcome = 'payment_declined') as payment_declined_orders,
+    count(*) filter (where outcome = 'inventory_rejected') as inventory_rejected_orders,
+    count(*) filter (where outcome not in (
         'processed',
         'payment_declined',
         'inventory_rejected'
