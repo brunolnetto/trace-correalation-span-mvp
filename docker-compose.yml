@@ -8,11 +8,46 @@ services:
       - "4317:4317"
       - "4318:4318"
 
+  event-collector:
+    build: .
+    command:
+      - uvicorn
+      - app.event_collector.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8010"
+    environment:
+      SERVICE_NAME: event-collector
+      EVENT_STORE_PATH: /data/events.jsonl
+      EVENT_QUARANTINE_PATH: /data/quarantine.jsonl
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+      OTEL_TRACES_SAMPLER_ARG: "1.0"
+      ENVIRONMENT: development
+    volumes:
+      - event-data:/data
+    ports:
+      - "127.0.0.1:18003:8010"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8010/healthz", timeout=2)
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    depends_on:
+      jaeger:
+        condition: service_started
+
   inventory-api:
     build: .
     command: ["uvicorn", "app.inventory.main:app", "--host", "0.0.0.0", "--port", "8001"]
     environment:
       SERVICE_NAME: inventory-api
+      EVENT_COLLECTOR_URL: http://event-collector:8010
       INVENTORY_SEED_DEMO_DATA: "true"
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
       OTEL_TRACES_SAMPLER_ARG: "1.0"
@@ -30,13 +65,17 @@ services:
       retries: 12
       start_period: 5s
     depends_on:
-      - jaeger
+      jaeger:
+        condition: service_started
+      event-collector:
+        condition: service_healthy
 
   order-api:
     build: .
     command: ["uvicorn", "app.order.main:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
       SERVICE_NAME: order-api
+      EVENT_COLLECTOR_URL: http://event-collector:8010
       INVENTORY_API_URL: http://inventory-api:8001
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
       OTEL_TRACES_SAMPLER_ARG: "1.0"
@@ -58,6 +97,8 @@ services:
         condition: service_started
       inventory-api:
         condition: service_healthy
+      event-collector:
+        condition: service_healthy
 
   supplier-simulator:
     build: .
@@ -70,6 +111,7 @@ services:
       - "8002"
     environment:
       SERVICE_NAME: supplier-simulator
+      EVENT_COLLECTOR_URL: http://event-collector:8010
       INVENTORY_API_URL: http://inventory-api:8001
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
       OTEL_TRACES_SAMPLER_ARG: "1.0"
@@ -91,6 +133,8 @@ services:
         condition: service_started
       inventory-api:
         condition: service_healthy
+      event-collector:
+        condition: service_healthy
 
   order-generator:
     build: .
@@ -105,3 +149,6 @@ services:
     depends_on:
       order-api:
         condition: service_healthy
+
+volumes:
+  event-data:

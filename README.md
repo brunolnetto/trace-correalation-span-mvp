@@ -307,6 +307,56 @@ log record is formatted. They are null when a log event is outside a span.
 The order request span records the `saga.id` attribute; detailed Sagaz action
 and compensation spans are a separate observability iteration.
 
+## Versioned raw event collection
+
+The Event Collector API is exposed on port 18003. Order and Inventory services
+forward their structured logs through a bounded background queue; request
+handlers only enqueue events and never wait on collector HTTP I/O. Supplier
+Simulation uses the same publisher when that service is included in the
+Compose stack.
+
+The collector accepts batches at `POST /v1/events` using schema version
+`1.0`. Each envelope preserves the original structured log in `source` and
+promotes its main fields:
+
+- `event_id`: immutable event identity used for replay deduplication.
+- `occurred_at` and collector-assigned `ingested_at`: event and ingestion time.
+- `service`, `logger`, `level`, and `event_name`.
+- `correlation_id`, `trace_id`, and `span_id` as separate identifiers.
+- `attributes`: original structured log attributes.
+
+Accepted records are appended to `/data/events.jsonl` and fsynced before the
+collector acknowledges the batch. The `event_id` index is rebuilt from that
+file on startup. Replaying the same event is a duplicate; reusing an event ID
+with a different payload is quarantined. Invalid or unsupported schema records
+are also written to `/data/quarantine.jsonl`; the original payload is
+preserved for inspection.
+
+Inspect collected data:
+
+```bash
+curl 'http://localhost:18003/v1/events?limit=100'
+curl 'http://localhost:18003/v1/quarantine?limit=100'
+curl http://localhost:18003/v1/stats
+```
+
+The Compose named volume `event-data` persists both JSONL files across
+container recreation. To intentionally erase the local event history, remove
+the volume as well as the containers:
+
+```bash
+docker compose down --volumes
+```
+
+Delivery guarantees are deliberately split: once accepted, the collector's
+append is durable and replay-safe. Before acknowledgement, service-side
+delivery is best-effort: its bounded in-memory queue retries transient HTTP
+failures, but queue overflow or abrupt service termination can still lose
+pending events. The publisher exposes dropped-event and failed-batch counters
+in process memory; a durable producer outbox is a future hardening step.
+The collector is a single-writer MVP; do not mount the same JSONL files into
+multiple collector replicas.
+
 ## Reproduce locally (recommended)
 
 Requirements: Docker Engine, Docker Compose v2, `uv`, and `curl`. The script
