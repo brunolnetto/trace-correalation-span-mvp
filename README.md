@@ -205,7 +205,7 @@ For a deterministic three-scenario check against the Compose demo product
 (product 7, seeded with 42 units and priced at 99.90), run:
 
 ```bash
-docker compose --profile simulation run --rm order-generator --mode coverage
+docker compose --profile simulation run --rm order-generator python -m app.order_generator --mode coverage
 ```
 
 The coverage mode expects one processed order (quantity 2), one payment
