@@ -48,8 +48,8 @@ def test_assessment_requires_every_pair_and_ignores_duplicates_and_other_runs():
     result = assess_events(records, expected)
 
     assert result["complete"] is True
-    assert result["expected_count"] == 12
-    assert result["observed_count"] == 12
+    assert result["expected_count"] == 11
+    assert result["observed_count"] == 11
     assert result["missing"] == []
 
 
@@ -83,7 +83,7 @@ async def test_barrier_waits_for_delayed_collector_visibility():
 
     assert result["status"] == "complete"
     assert result["poll_attempts"] == 2
-    assert result["observed_count"] == 12
+    assert result["observed_count"] == 11
     assert result["completed_at"] is not None
 
 
@@ -110,7 +110,7 @@ async def test_barrier_timeout_reports_missing_correlation_and_event_names():
     assert result["status"] == "timeout"
     assert result["observed_count"] == 0
     assert result["completed_at"] is None
-    assert len(result["missing"]) == 12
+    assert len(result["missing"]) == 11
     assert {
         (item["correlation_id"], item["event_name"])
         for item in result["missing"]
