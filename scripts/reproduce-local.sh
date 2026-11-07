@@ -313,7 +313,8 @@ PY
 
 echo "    running generator coverage and publishing attempts to raw storage"
 docker compose --profile simulation run --build --rm order-generator \
-  --mode coverage > "$TMP_DIR/generator.log"
+  python -m app.order_generator --mode coverage \
+  > "$TMP_DIR/generator.log"
 
 echo "==> 6/6: Verify JSON logs and Saga traces in Jaeger"
 TRACE_URL="$JAEGER_URL/api/traces?service=order-api&limit=50&lookback=1h"
