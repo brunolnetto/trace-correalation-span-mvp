@@ -136,6 +136,37 @@ services:
       event-collector:
         condition: service_healthy
 
+  simulation-runner:
+    build: .
+    profiles: ["standalone"]
+    command: ["python", "-m", "app.standalone_runner"]
+    environment:
+      ORDER_API_URL: http://order-api:8000
+      INVENTORY_API_URL: http://inventory-api:8001
+      SUPPLIER_API_URL: http://supplier-simulator:8002
+      EVENT_COLLECTOR_URL: http://event-collector:8010
+      SIMULATION_REPORT_PATH: /run-state/simulation-report.json
+      SIMULATION_PRODUCT_ID: "7"
+      SIMULATION_OPENING_STOCK: "42"
+      SIMULATION_REORDER_POINT: "30"
+      SIMULATION_TARGET_STOCK: "60"
+      SIMULATION_LEAD_TIME_SECONDS: "3600"
+      SIMULATION_FIRST_BATCH_COUNT: "8"
+      SIMULATION_SECOND_BATCH_COUNT: "4"
+      SIMULATION_ORDER_QUANTITY: "2"
+      SIMULATION_SEED: "20261107"
+    volumes:
+      - run-state:/run-state
+    depends_on:
+      order-api:
+        condition: service_healthy
+      inventory-api:
+        condition: service_healthy
+      supplier-simulator:
+        condition: service_healthy
+      event-collector:
+        condition: service_healthy
+
   order-generator:
     build: .
     profiles: ["simulation"]
@@ -179,3 +210,4 @@ services:
 volumes:
   event-data:
   analytics-data:
+  run-state:
