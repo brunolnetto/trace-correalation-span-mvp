@@ -198,7 +198,7 @@ async def test_execute_plan_records_transport_errors_without_aborting_run():
     assert attempts[0].error.startswith("ConnectError:")
 
 
-def test_generator_run_id_and_events_are_stable_and_correlated():
+def test_generator_plan_id_and_run_correlations_are_stable_and_unique():
     config = GeneratorConfig(
         mode="coverage",
         seed=42,
@@ -227,7 +227,7 @@ def test_generator_run_id_and_events_are_stable_and_correlated():
     )
     second_execution = build_plan(config, execution_id="coverage-run-002")
 
-    assert config.run_id == GeneratorConfig(
+    assert config.plan_id == GeneratorConfig(
         mode="coverage",
         seed=42,
         product_id=7,
