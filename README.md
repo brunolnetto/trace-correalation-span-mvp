@@ -181,6 +181,48 @@ Inventory reservations are idempotent for a given `saga_id` and product.
 The inventory store protects concurrent reservations with an async lock and
 rejects overselling within one process.
 
+## Deterministic order generator
+
+A one-shot generator exercises the public Order API; it never changes inventory
+state directly. Its seed determines the generated quantities, order IDs, and
+correlation IDs, making scenario input reproducible across runs. Latency is
+measured at runtime and therefore is not expected to be identical.
+
+Start the normal Compose services, then run a seeded random batch:
+
+```bash
+docker compose up --build --detach
+docker compose --profile simulation run --build --rm order-generator
+```
+
+The generator writes one JSON event per attempted order and a final summary to
+stdout. The summary includes processed, payment-declined, inventory-rejected,
+unexpected-failure counts, and mean/p50/p95/max request latency. HTTP 402 and
+409 are domain outcomes, not transport failures. Network errors, unexpected
+HTTP statuses, and 5xx responses produce a non-zero exit code.
+
+For a deterministic three-scenario check against the Compose demo product
+(product 7, seeded with 42 units and priced at 99.90), run:
+
+```bash
+docker compose --profile simulation run --build --rm order-generator python -m app.order_generator --mode coverage
+```
+
+The coverage mode expects one processed order (quantity 2), one payment
+decline (quantity 11, above the default 1000 payment threshold), and one
+insufficient-stock rejection. It reports a scenario mismatch and exits
+non-zero if the configured API/product state does not produce those outcomes.
+Use a fresh Compose stack when repeating this check because successful orders
+keep their stock reservations in the current in-memory order lifecycle.
+
+The defaults can be overridden through CLI flags or environment variables:
+`ORDER_API_URL`, `ORDER_GENERATOR_MODE`, `ORDER_GENERATOR_COUNT`,
+`ORDER_GENERATOR_SEED`, `ORDER_GENERATOR_PRODUCT_ID`,
+`ORDER_GENERATOR_FIRST_ORDER_ID`, `ORDER_GENERATOR_MIN_QUANTITY`, and
+`ORDER_GENERATOR_MAX_QUANTITY`. Coverage quantities have corresponding
+`ORDER_GENERATOR_SUCCESS_QUANTITY`, `ORDER_GENERATOR_DECLINE_QUANTITY`, and
+`ORDER_GENERATOR_INSUFFICIENT_QUANTITY` overrides.
+
 ## JSON logs
 
 Each service writes one JSON object per log event to stdout. Example fields:
