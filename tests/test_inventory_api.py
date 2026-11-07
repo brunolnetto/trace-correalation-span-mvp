@@ -198,7 +198,7 @@ async def test_inventory_commit_reduces_on_hand_and_excludes_reserved():
 
 
 @pytest.mark.asyncio
-async def test_adjustment_endpoint_is_idempotent_and_protects_reserved_stock():
+async def test_adjustment_endpoint_is_idempotent_and_rejects_negative_stock():
     product_id = await create_product(quantity=10)
     payload = {
         "quantity_delta": -2,
