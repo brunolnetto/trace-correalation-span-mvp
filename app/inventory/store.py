@@ -17,7 +17,11 @@ def utc_now() -> str:
 
 
 class ProductCreate(BaseModel):
-    sku: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    sku: str = Field(
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
     name: str = Field(min_length=1, max_length=120)
     category: str = Field(min_length=1, max_length=80)
     unit_price: Decimal = Field(gt=0, max_digits=12, decimal_places=2)
