@@ -76,6 +76,7 @@ echo "==> 3/6: Run Ruff"
 uv run --python 3.12 ruff check .
 
 echo "==> 4/6: Build and start Jaeger, APIs, supplier, and event collector"
+docker compose down --remove-orphans
 docker compose up --build --detach
 
 wait_for_url() {
