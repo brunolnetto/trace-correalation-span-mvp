@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 import httpx
-import json
 import pytest
 
 from app.supplier_simulator.store import (
@@ -86,7 +86,7 @@ class InventoryDouble:
         ):
             self.receipt_calls += 1
             product_id = int(parts[1])
-            payload = __import__("json").loads(request.content)
+            payload = json.loads(request.content)
             key = f"{product_id}:{payload['idempotency_key']}"
             if key not in self.receipts:
                 self.balances[product_id]["on_hand"] += payload["quantity"]
