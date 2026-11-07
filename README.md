@@ -116,8 +116,9 @@ reservations, releases, commits, and the demo opening balance.
 
 ### Reservation lifecycle and order processing
 
-The Order API reads the catalog price before starting the Saga. The order
-Saga then reserves inventory before charging payment. A successful order
+The Order API reads the catalog price before starting the Saga and calculates
+the order total from the unit price and quantity. The order Saga then reserves
+inventory before charging payment. A successful order
 currently leaves its reservation in `reserved` state, representing allocated
 stock awaiting a later fulfillment step. The commit endpoint is
 available for that later step; the current order Saga does not yet model
