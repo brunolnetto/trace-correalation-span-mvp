@@ -37,12 +37,20 @@ async def reset_state():
     workflow._orders.clear()
 
 
-def install_inventory_mock(monkeypatch, *, fail_release=False, reject_reservation=False):
+def install_inventory_mock(
+    monkeypatch,
+    *,
+    fail_release=False,
+    reject_reservation=False,
+    product_not_found=False,
+):
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         if request.method == "POST":
+            if product_not_found:
+                return httpx.Response(404, json={"detail": "product not found"})
             if reject_reservation:
                 return httpx.Response(409, json={"detail": "insufficient inventory"})
             return httpx.Response(
@@ -147,5 +155,19 @@ async def test_inventory_conflict_returns_409_without_charging_payment(monkeypat
     )
 
     assert response.status_code == 409
+    assert [request.method for request in requests] == ["POST"]
+    assert workflow._orders == {}
+
+
+@pytest.mark.asyncio
+async def test_unknown_product_returns_404_without_charging_payment(monkeypatch):
+    requests = install_inventory_mock(monkeypatch, product_not_found=True)
+
+    response = await post_order(
+        "550e8400-e29b-41d4-a716-446655440305"
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Product not found."
     assert [request.method for request in requests] == ["POST"]
     assert workflow._orders == {}
