@@ -237,7 +237,7 @@ import sys
 from pathlib import Path
 
 onboard, decision, ordered, received, recheck, inventory, product_id = (
-    json.loads(Path(path).read_text()) for path in sys.argv[1:7]
+    json.loads(Path(path).read_text()) for path in sys.argv[1:8]
 )
 assert onboard["product"]["product_id"] == int(product_id)
 assert decision["decisions"][0]["decision"] == "purchase_order_created"
