@@ -311,6 +311,10 @@ print("    inventory after compensation: on_hand=42 reserved=2 available=40")
 print("    insufficient-stock order rejected without changing inventory")
 PY
 
+echo "    running generator coverage and publishing attempts to raw storage"
+docker compose --profile simulation run --build --rm order-generator \
+  --mode coverage > "$TMP_DIR/generator.log"
+
 echo "==> 6/6: Verify JSON logs and Saga traces in Jaeger"
 TRACE_URL="$JAEGER_URL/api/traces?service=order-api&limit=50&lookback=1h"
 TRACE_FOUND=0
@@ -427,14 +431,36 @@ while (( SECONDS < deadline )); do
     -o "$TMP_DIR/collected-events.json"; then
     if python3 - "$TMP_DIR/collected-events.json" \
       "$PROCESS_CORRELATION_ID" "$DECLINE_CORRELATION_ID" \
-      "$INSUFFICIENT_CORRELATION_ID" "$SUPPLIER_CORRELATION_ID" <<'PY'
+      "$INSUFFICIENT_CORRELATION_ID" "$SUPPLIER_CORRELATION_ID" \
+      "$TMP_DIR/generator.log" <<'PY'
 import json
 import sys
 from pathlib import Path
 
-path, process_id, decline_id, insufficient_id, supplier_id = sys.argv[1:]
+path, process_id, decline_id, insufficient_id, supplier_id, generator_log = sys.argv[1:]
 payload = json.loads(Path(path).read_text())
 events = [record["event"] for record in payload.get("events", [])]
+attempt_records = []
+summary_records = []
+for line in Path(generator_log).read_text().splitlines():
+    try:
+        record = json.loads(line)
+    except json.JSONDecodeError:
+        continue
+    if record.get("event") == "order_generator.attempt":
+        attempt_records.append(record)
+    elif record.get("event") == "order_generator.summary":
+        summary_records.append(record)
+assert len(attempt_records) == 3, attempt_records
+assert len(summary_records) == 1, summary_records
+generator_run_id = summary_records[0]["run_id"]
+assert {record["run_id"] for record in attempt_records} == {generator_run_id}
+assert {record["outcome"] for record in attempt_records} == {
+    "processed",
+    "payment_declined",
+    "inventory_rejected",
+}
+
 required = {
     process_id: {
         "order.process.started",
@@ -458,6 +484,29 @@ required = {
         "inventory.stock.received",
     },
 }
+for attempt in attempt_records:
+    required[attempt["correlation_id"]] = {
+        "order_generator.attempt",
+        "order.process.started",
+        "order.process.completed"
+        if attempt["outcome"] == "processed"
+        else "order.process.failed",
+    }
+    if attempt["outcome"] == "payment_declined":
+        required[attempt["correlation_id"]].update(
+            {
+                "inventory.reservation.created",
+                "inventory.reservation.released",
+            }
+        )
+    elif attempt["outcome"] == "inventory_rejected":
+        required[attempt["correlation_id"]].add(
+            "inventory.reservation.rejected"
+        )
+    else:
+        required[attempt["correlation_id"]].add(
+            "inventory.reservation.created"
+        )
 for correlation_id, messages in required.items():
     correlated = [
         event for event in events
@@ -467,19 +516,25 @@ for correlation_id, messages in required.items():
     services = {event.get("service") for event in correlated}
     if not messages.issubset(found):
         raise SystemExit(1)
-    required_services = (
-        {"supplier-simulator", "inventory-api"}
-        if correlation_id == supplier_id
-        else {"order-api", "inventory-api"}
-    )
+    if correlation_id == supplier_id:
+        required_services = {"supplier-simulator", "inventory-api"}
+    elif correlation_id in {
+        attempt["correlation_id"] for attempt in attempt_records
+    }:
+        required_services = {"order-generator", "order-api", "inventory-api"}
+    else:
+        required_services = {"order-api", "inventory-api"}
     if not required_services.issubset(services):
         raise SystemExit(1)
     for event in correlated:
-        if event.get("event_name") in messages:
+        if (
+            event.get("event_name") in messages
+            and event.get("service") != "order-generator"
+        ):
             if not event.get("trace_id") or not event.get("span_id"):
                 raise SystemExit(1)
 print(f"    raw events persisted: {len(events)}")
-print("    order and supplier lifecycle events found in durable raw event storage")
+print("    order, supplier, and generator events persisted and correlated")
 PY
     then
       COLLECTED=1
