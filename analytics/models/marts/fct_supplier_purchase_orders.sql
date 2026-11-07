@@ -14,6 +14,7 @@ with lifecycle_events as (
             json_extract_string(attributes, '$.quantity') as integer
         ) as quantity,
         json_extract_string(attributes, '$.status') as status,
+        json_extract_string(attributes, '$.decision') as decision,
         json_extract_string(attributes, '$.receipt_id') as receipt_id,
         try_cast(
             json_extract_string(attributes, '$.lead_time_seconds') as integer
@@ -78,8 +79,7 @@ purchase_orders as (
       and purchase_order_id is not null
       and (
           event_name <> 'supplier.replenishment.evaluated'
-          or json_extract_string(attributes, '$.decision')
-              = 'purchase_order_created'
+          or decision = 'purchase_order_created'
       )
     group by purchase_order_id
 )
