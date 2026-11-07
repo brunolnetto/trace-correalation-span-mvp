@@ -268,12 +268,12 @@ class InventoryStore:
             self._require_product_locked(product_id)
             balance = self._balances[product_id]
             adjusted_on_hand = balance["on_hand"] + request.quantity_delta
+            if adjusted_on_hand < 0:
+                raise ValueError("Adjustment cannot make on-hand stock negative")
             if adjusted_on_hand < balance["reserved"]:
                 raise ValueError(
                     "Adjustment cannot reduce on-hand below reserved quantity"
                 )
-            if adjusted_on_hand < 0:
-                raise ValueError("Adjustment cannot make on-hand stock negative")
 
             balance["on_hand"] = adjusted_on_hand
             return self._append_movement_locked(
