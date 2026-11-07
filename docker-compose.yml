@@ -13,6 +13,7 @@ services:
     command: ["uvicorn", "app.inventory.main:app", "--host", "0.0.0.0", "--port", "8001"]
     environment:
       SERVICE_NAME: inventory-api
+      INVENTORY_SEED_DEMO_DATA: "true"
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
       OTEL_TRACES_SAMPLER_ARG: "1.0"
       ENVIRONMENT: development
