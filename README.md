@@ -393,11 +393,13 @@ bash scripts/reproduce-local.sh
 ```
 
 The script resolves/synchronizes dependencies, runs pytest and Ruff, builds
-and starts Jaeger plus both APIs, waits for readiness, creates a low-stock
-product and receives its initial stock, exercises a successful order, a
-payment decline with compensation, and an insufficient-stock rejection. It
-then verifies the inventory balances, correlated JSON logs, and a
-cross-service trace in Jaeger. It leaves the Compose stack running for
+and starts Jaeger, the Order/Inventory APIs, the Supplier Simulation API, and
+the Event Collector. It exercises a successful order, a payment decline with
+compensation, an insufficient-stock rejection, supplier onboarding and
+replenishment through a simulated lead time, and the generator's three
+coverage scenarios. It then verifies balances, correlated JSON logs,
+cross-service Jaeger traces, and raw event persistence for the order,
+supplier, and generator events. It leaves the Compose stack running for
 inspection; stop it with `docker compose down`. Pass `--cleanup` to stop the
 stack automatically when the script exits.
 
@@ -418,8 +420,8 @@ uv lock --python 3.12
 docker compose up --build
 ```
 
-The APIs are exposed on host ports `18000` (Order) and `18001` (Inventory)
-to avoid conflicts with common local development services. Jaeger UI is
+The APIs are exposed on host ports `18000` (Order), `18001` (Inventory),
+`18002` (Supplier Simulation), and `18003` (Event Collector). Jaeger UI is
 available on port `16686`. Compose explicitly enables
 `INVENTORY_SEED_DEMO_DATA`, which creates product 7 with 42 units. The
 Inventory API does not assume stock for unknown product IDs.
