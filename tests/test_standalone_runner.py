@@ -27,6 +27,16 @@ def _scenario_transport(
         "supplier_correlations": [],
     }
 
+    def emit_event(correlation_id: str, event_name: str) -> None:
+        event_id = f"service-event-{len(state['collector_events']) + 1}"
+        state["collector_events"].append(
+            {
+                "event_id": event_id,
+                "correlation_id": correlation_id,
+                "event_name": event_name,
+            }
+        )
+
     def handler(request: httpx.Request) -> httpx.Response:
         host = request.url.host
         path = request.url.path
@@ -51,9 +61,31 @@ def _scenario_transport(
                     json={"detail": "simulated inventory rejection"},
                 )
             state["reserved"] += payload["quantity"]
+            for event_name in (
+                "order.process.started",
+                "order.process.completed",
+                "inventory.reservation.created",
+                "inventory.reservation.committed",
+            ):
+                emit_event(correlation_id or "", event_name)
             return httpx.Response(
                 201,
                 json={"order_id": order_id, "status": "processed"},
+            )
+
+        if (
+            host == "event-collector"
+            and request.method == "GET"
+            and path == "/v1/events"
+        ):
+            return httpx.Response(
+                200,
+                json={
+                    "events": [
+                        {"event_id": event["event_id"], "event": event}
+                        for event in state["collector_events"]
+                    ]
+                },
             )
 
         if (
@@ -103,6 +135,7 @@ def _scenario_transport(
                 )
             if request.method == "PUT" and path == "/reorder-policies":
                 state["policy"] = json.loads(request.content)
+                emit_event(correlation_id or "", "supplier.reorder_policy.updated")
                 return httpx.Response(
                     200,
                     json={**state["policy"], "version": 1},
@@ -142,12 +175,14 @@ def _scenario_transport(
                         "inventory_position": available,
                         "purchase_order": state["purchase_order"].copy(),
                     }
+                emit_event(correlation_id or "", "supplier.replenishment.evaluated")
                 return httpx.Response(200, json={"decisions": [decision]})
             if (
                 request.method == "POST"
                 and path == "/purchase-orders/po-test-001/order"
             ):
                 state["purchase_order"]["status"] = "ordered"
+                emit_event(correlation_id or "", "supplier.purchase_order.ordered")
                 return httpx.Response(200, json=state["purchase_order"].copy())
             if request.method == "POST" and path == "/clock/advance":
                 payload = json.loads(request.content)
@@ -167,6 +202,8 @@ def _scenario_transport(
                     state["on_hand"] += order["quantity"]
                     order["status"] = "received"
                     order["receipt_id"] = "receipt-test-001"
+                    emit_event(correlation_id or "", "inventory.stock.received")
+                    emit_event(correlation_id or "", "supplier.purchase_order.received")
                 return httpx.Response(200, json=order.copy())
 
         return httpx.Response(404, json={"detail": f"unexpected request {request.method} {host}{path}"})
@@ -203,7 +240,11 @@ async def test_standalone_scenario_runs_both_batches_and_replenishes_once(
     assert state["on_hand"] == 76
     assert state["reserved"] == 24
     assert state["purchase_order"]["status"] == "received"
-    assert len(state["collector_events"]) == 14
+    assert len(state["collector_events"]) == 69
+    assert report["collector_barrier"]["status"] == "complete"
+    assert report["collector_barrier"]["expected_count"] == 67
+    assert report["collector_barrier"]["observed_count"] == 67
+    assert report["summary"]["collector_events_observed"] == 67
     assert len(set(state["supplier_correlations"])) == 1
 
     saved = json.loads(Path(config.report_path).read_text(encoding="utf-8"))
