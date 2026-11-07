@@ -166,7 +166,9 @@ async def test_adjustment_cannot_consume_reserved_stock_or_make_stock_negative()
         await store.adjust_stock(
             product_id,
             InventoryAdjustmentRequest(
-                quantity_delta=-5, reason="damaged goods"
+                quantity_delta=-5,
+                reason="damaged goods",
+                idempotency_key="damaged-001",
             ),
         )
 
@@ -174,7 +176,9 @@ async def test_adjustment_cannot_consume_reserved_stock_or_make_stock_negative()
         await store.adjust_stock(
             product_id,
             InventoryAdjustmentRequest(
-                quantity_delta=-11, reason="stock correction"
+                quantity_delta=-11,
+                reason="stock correction",
+                idempotency_key="correction-001",
             ),
         )
 
@@ -204,3 +208,31 @@ async def test_concurrent_reservations_never_oversell_inventory():
     assert snapshot["on_hand"] == 42
     assert snapshot["reserved"] == 40
     assert snapshot["available"] == 2
+
+
+
+@pytest.mark.asyncio
+async def test_stock_adjustment_is_idempotent():
+    store = InventoryStore()
+    product_id = await create_stocked_product(store, quantity=10)
+    request = InventoryAdjustmentRequest(
+        quantity_delta=3,
+        reason="count correction",
+        idempotency_key="cycle-count-001",
+    )
+
+    first = await store.adjust_stock(product_id, request)
+    repeated = await store.adjust_stock(product_id, request)
+
+    assert repeated == first
+    assert (await store.inventory_snapshot(product_id))["on_hand"] == 13
+
+    with pytest.raises(ValueError, match="idempotency key was reused"):
+        await store.adjust_stock(
+            product_id,
+            InventoryAdjustmentRequest(
+                quantity_delta=4,
+                reason="count correction",
+                idempotency_key="cycle-count-001",
+            ),
+        )
