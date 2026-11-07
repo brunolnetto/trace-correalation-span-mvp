@@ -3,20 +3,32 @@ from __future__ import annotations
 import logging
 import os
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, status
 from opentelemetry import trace
 
-from app.inventory.store import InventoryReservationRequest, InventoryStore
+from app.inventory.store import (
+    InventoryAdjustmentRequest,
+    InventoryReceiptRequest,
+    InventoryReservationRequest,
+    InventoryStore,
+    ProductCreate,
+    ProductUpdate,
+)
 from app.observability import configure_observability
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("inventory-api")
-inventory_store = InventoryStore()
+seed_demo_data = os.getenv("INVENTORY_SEED_DEMO_DATA", "false").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+inventory_store = InventoryStore(seed_demo_data=seed_demo_data)
 
 app = FastAPI(
     title="Inventory API",
-    description="Inventory service demonstrating downstream trace context.",
-    version="0.1.0",
+    description="Product catalog and inventory lifecycle with correlated traces.",
+    version="0.2.0",
 )
 configure_observability(app, os.getenv("SERVICE_NAME", "inventory-api"))
 
@@ -26,23 +38,151 @@ async def healthcheck():
     return {"status": "ok", "service": "inventory-api"}
 
 
+@app.post("/products", status_code=status.HTTP_201_CREATED, tags=["catalog"])
+async def create_product(request: ProductCreate):
+    try:
+        product = await inventory_store.create_product(request)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+    logger.info(
+        "product.created",
+        extra={
+            "product_id": product["product_id"],
+            "sku": product["sku"],
+            "category": product["category"],
+        },
+    )
+    return product
+
+
+@app.get("/products", tags=["catalog"])
+async def list_products(include_inactive: bool = False):
+    return await inventory_store.list_products(include_inactive=include_inactive)
+
+
+@app.get("/products/{product_id}", tags=["catalog"])
+async def get_product(product_id: int):
+    try:
+        return await inventory_store.get_product(product_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Product not found") from None
+
+
+@app.patch("/products/{product_id}", tags=["catalog"])
+async def update_product(product_id: int, request: ProductUpdate):
+    try:
+        product = await inventory_store.update_product(product_id, request)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Product not found") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+
+    logger.info(
+        "product.updated",
+        extra={
+            "product_id": product_id,
+            "is_active": product["is_active"],
+        },
+    )
+    return product
+
+
 @app.get("/inventory/{product_id}", tags=["inventory"])
 async def get_inventory(product_id: int):
     with tracer.start_as_current_span("inventory.lookup") as span:
         span.set_attribute("inventory.product_id", product_id)
-        quantity = await inventory_store.available_quantity(product_id)
+        try:
+            inventory = await inventory_store.inventory_snapshot(product_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="Product not found"
+            ) from None
+
         logger.info(
             "inventory.lookup.completed",
             extra={
                 "product_id": product_id,
-                "available_quantity": quantity,
+                "on_hand": inventory["on_hand"],
+                "reserved": inventory["reserved"],
+                "available_quantity": inventory["available_quantity"],
             },
         )
-        return {
-            "product_id": product_id,
-            "available": quantity > 0,
-            "quantity": quantity,
-        }
+        return inventory
+
+
+@app.post(
+    "/inventory/{product_id}/receipts",
+    status_code=status.HTTP_201_CREATED,
+    tags=["inventory"],
+)
+async def receive_inventory(product_id: int, request: InventoryReceiptRequest):
+    with tracer.start_as_current_span("inventory.receive") as span:
+        span.set_attribute("inventory.product_id", product_id)
+        span.set_attribute("inventory.quantity", request.quantity)
+        try:
+            receipt = await inventory_store.receive_stock(product_id, request)
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="Product not found"
+            ) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+
+        logger.info(
+            "inventory.stock.received",
+            extra={
+                "product_id": product_id,
+                "receipt_id": receipt["receipt_id"],
+                "quantity": request.quantity,
+                "idempotency_key": request.idempotency_key,
+            },
+        )
+        return receipt
+
+
+@app.post(
+    "/inventory/{product_id}/adjustments",
+    status_code=status.HTTP_201_CREATED,
+    tags=["inventory"],
+)
+async def adjust_inventory(
+    product_id: int, request: InventoryAdjustmentRequest
+):
+    with tracer.start_as_current_span("inventory.adjust") as span:
+        span.set_attribute("inventory.product_id", product_id)
+        span.set_attribute("inventory.quantity_delta", request.quantity_delta)
+        try:
+            movement = await inventory_store.adjust_stock(product_id, request)
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="Product not found"
+            ) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+
+        logger.info(
+            "inventory.stock.adjusted",
+            extra={
+                "product_id": product_id,
+                "movement_id": movement["movement_id"],
+                "quantity_delta": request.quantity_delta,
+                "reason": request.reason,
+                "idempotency_key": request.idempotency_key,
+            },
+        )
+        return movement
+
+
+@app.get("/inventory/{product_id}/movements", tags=["inventory"])
+async def list_inventory_movements(
+    product_id: int,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    try:
+        return await inventory_store.list_movements(product_id, limit=limit)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Product not found") from None
 
 
 @app.post("/inventory/{product_id}/reservations", tags=["inventory"])
@@ -59,6 +199,8 @@ async def reserve_inventory(
         )
         try:
             reservation = await inventory_store.reserve(product_id, request)
+        except KeyError:
+            raise HTTPException(status_code=404, detail="Product not found") from None
         except ValueError as exc:
             logger.warning(
                 "inventory.reservation.rejected",
@@ -79,6 +221,32 @@ async def reserve_inventory(
                 "saga_id": request.saga_id,
                 "reservation_id": reservation["reservation_id"],
                 "quantity": request.quantity,
+            },
+        )
+        return reservation
+
+
+@app.post(
+    "/inventory/reservations/{reservation_id}/commit",
+    tags=["inventory"],
+)
+async def commit_inventory_reservation(reservation_id: str):
+    with tracer.start_as_current_span("inventory.commit") as span:
+        span.set_attribute("inventory.reservation_id", reservation_id)
+        try:
+            reservation = await inventory_store.commit(reservation_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="Reservation not found"
+            ) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+
+        logger.info(
+            "inventory.reservation.committed",
+            extra={
+                "reservation_id": reservation_id,
+                "status": reservation["status"],
             },
         )
         return reservation

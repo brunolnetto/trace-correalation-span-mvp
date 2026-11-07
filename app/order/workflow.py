@@ -6,7 +6,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 import httpx
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sagaz import Saga, SagaConfig, action, compensate
 from sagaz.core.listeners import SagaListener
 
@@ -15,9 +15,10 @@ PAYMENT_DECLINE_ABOVE = float(os.getenv("PAYMENT_DECLINE_ABOVE", "1000"))
 
 
 class ProcessOrderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     product_id: int = Field(gt=0)
     quantity: int = Field(default=1, gt=0)
-    amount: float = Field(gt=0, allow_inf_nan=False)
 
 
 class PaymentDeclined(Exception):
