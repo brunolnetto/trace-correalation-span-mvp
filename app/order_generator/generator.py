@@ -248,12 +248,16 @@ def summarize(
         if attempt.expected_outcome is not None
         and attempt.expected_outcome != attempt.outcome
     ]
-    unexpected_failures = (
-        outcome_counts["product_not_found"]
-        + outcome_counts["server_error"]
-        + outcome_counts["unexpected_http_status"]
-        + outcome_counts["transport_error"]
-        + sum(attempt.error is not None for attempt in attempts)
+    unexpected_failures = sum(
+        attempt.outcome
+        in {
+            "product_not_found",
+            "server_error",
+            "unexpected_http_status",
+            "transport_error",
+        }
+        or attempt.error is not None
+        for attempt in attempts
     )
     return {
         "event": "order_generator.summary",
