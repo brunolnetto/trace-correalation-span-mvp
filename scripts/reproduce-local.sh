@@ -13,11 +13,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-READ_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440000"
-PROCESS_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440001"
-DECLINE_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440002"
-INSUFFICIENT_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440003"
-SUPPLIER_CORRELATION_ID="550e8400-e29b-41d4-a716-446655440004"
+REPRO_CORRELATION_IDS=()
 ORDER_URL="${ORDER_URL:-http://127.0.0.1:18000}"
 INVENTORY_URL="${INVENTORY_URL:-http://127.0.0.1:18001}"
 JAEGER_URL="${JAEGER_URL:-http://127.0.0.1:16686}"
@@ -41,6 +37,20 @@ require_command docker
 require_command curl
 require_command python3
 require_command uv
+mapfile -t REPRO_CORRELATION_IDS < <(
+  python3 - <<'PY'
+import uuid
+
+for _ in range(5):
+    print(uuid.uuid4())
+PY
+)
+[[ ${#REPRO_CORRELATION_IDS[@]} -eq 5 ]] || die "Could not generate unique reproduction correlation IDs"
+READ_CORRELATION_ID="${REPRO_CORRELATION_IDS[0]}"
+PROCESS_CORRELATION_ID="${REPRO_CORRELATION_IDS[1]}"
+DECLINE_CORRELATION_ID="${REPRO_CORRELATION_IDS[2]}"
+INSUFFICIENT_CORRELATION_ID="${REPRO_CORRELATION_IDS[3]}"
+SUPPLIER_CORRELATION_ID="${REPRO_CORRELATION_IDS[4]}"
 docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is required"
 docker info >/dev/null 2>&1 || die "Docker daemon is not reachable"
 
