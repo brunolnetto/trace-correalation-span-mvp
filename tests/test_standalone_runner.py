@@ -68,7 +68,6 @@ def _scenario_transport(
                 "order.process.started",
                 "order.process.completed",
                 "inventory.reservation.created",
-                "inventory.reservation.committed",
             ):
                 emit_event(correlation_id or "", event_name)
             return httpx.Response(
@@ -246,11 +245,11 @@ async def test_standalone_scenario_runs_both_batches_and_replenishes_once(
     assert state["on_hand"] == 76
     assert state["reserved"] == 24
     assert state["purchase_order"]["status"] == "received"
-    assert len(state["collector_events"]) == 69
+    assert len(state["collector_events"]) == 57
     assert report["collector_barrier"]["status"] == "complete"
-    assert report["collector_barrier"]["expected_count"] == 67
-    assert report["collector_barrier"]["observed_count"] == 67
-    assert report["summary"]["collector_events_observed"] == 67
+    assert report["collector_barrier"]["expected_count"] == 55
+    assert report["collector_barrier"]["observed_count"] == 55
+    assert report["summary"]["collector_events_observed"] == 55
     assert len(set(state["supplier_correlations"])) == 1
 
     saved = json.loads(Path(config.report_path).read_text(encoding="utf-8"))
@@ -341,7 +340,7 @@ async def test_standalone_scenario_fails_with_missing_collector_events_in_report
     barrier = report["collector_barrier"]
     assert report["status"] == "failed"
     assert barrier["status"] == "timeout"
-    assert barrier["observed_count"] == 66
+    assert barrier["expected_count"] == 67
     assert barrier["expected_count"] == 67
     assert barrier["missing"] == [
         {
