@@ -17,7 +17,7 @@ This is deliberately not a request for Airflow, Prefect, Dagster, Celery, a new 
 
 ### Phase 1 — Deterministic simulation scenario
 
-**[#13 — Implement the finite deterministic Simulation Runner](../issues/13)**
+**[#13 — Implement the finite deterministic Simulation Runner](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/13)**
 
 Build a finite scenario driver that reuses the existing Order Generator and public Order, Supplier Simulator, and Inventory APIs.
 
@@ -34,7 +34,7 @@ The reference scenario uses product `7` with opening stock `42`, reorder point `
 
 ### Phase 2 — Durable event completion barrier
 
-**[#14 — Add a durable Event Collector completion barrier](../issues/14)**
+**[#14 — Add a durable Event Collector completion barrier](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/14)**
 
 The Simulation Runner must not report success merely because service calls returned or containers are healthy. It must poll the Collector until every required event for this run is visible under the expected correlation ID.
 
@@ -44,7 +44,7 @@ The required event set must be derived from the existing producer implementation
 
 ### Phase 3 — Finite analytics execution
 
-**[#15 — Implement the finite Analytics Runner for dbt](../issues/15)**
+**[#15 — Implement the finite Analytics Runner for dbt](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/15)**
 
 Validate the successful simulation report, read the Collector data volume read-only, execute the existing `dbt build`, and write `run-report.json` with the run ID, command outcome, build summary, and failure details.
 
@@ -52,7 +52,7 @@ Validate the successful simulation report, read the Collector data volume read-o
 
 ### Phase 4 — Compose orchestration and lifecycle
 
-**[#16 — Wire the standalone Compose profile and finite job lifecycle](../issues/16)**
+**[#16 — Wire the standalone Compose profile and finite job lifecycle](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/16)**
 
 Add a `standalone` profile for the two finite runners. Keep the existing APIs, Supplier Simulator, Event Collector, and Jaeger as separate services.
 
@@ -70,7 +70,7 @@ docker compose --profile standalone up --build \
 
 ### Phase 5 — End-to-end verification and documentation
 
-**[#17 — Add standalone end-to-end verification and user documentation](../issues/17)**
+**[#17 — Add standalone end-to-end verification and user documentation](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/17)**
 
 Run the complete scenario from a clean Compose state. Verify inventory and PO invariants, Collector event coverage, dbt success, and failure propagation. Update README with invocation, prerequisites, configuration, report locations, cleanup, and known limitations.
 
