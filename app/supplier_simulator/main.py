@@ -184,7 +184,9 @@ async def order_purchase_order(purchase_order_id: str):
     try:
         result = await simulation.order_purchase_order(purchase_order_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail="Purchase order not found.") from None
+        raise HTTPException(
+            status_code=404, detail="Purchase order not found."
+        ) from None
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
 
@@ -213,7 +215,9 @@ async def receive_purchase_order(purchase_order_id: str):
                 purchase_order_id, client, correlation_id()
             )
     except KeyError:
-        raise HTTPException(status_code=404, detail="Purchase order not found.") from None
+        raise HTTPException(
+            status_code=404, detail="Purchase order not found."
+        ) from None
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
     except httpx.HTTPError as exc:
@@ -242,7 +246,9 @@ async def cancel_purchase_order(purchase_order_id: str):
     try:
         result = await simulation.cancel_purchase_order(purchase_order_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail="Purchase order not found.") from None
+        raise HTTPException(
+            status_code=404, detail="Purchase order not found."
+        ) from None
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from None
 
