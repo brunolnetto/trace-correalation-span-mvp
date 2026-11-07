@@ -11,7 +11,7 @@ Start the services and produce correlated Order API plus generator events
 
 ```bash
 docker compose up --build --detach
-docker compose --profile simulation run --build --rm order-generator --mode coverage
+docker compose --profile simulation run --build --rm order-generator python -m app.order_generator --mode coverage
 docker compose --profile analytics run --build --rm analytics
 ```
 
