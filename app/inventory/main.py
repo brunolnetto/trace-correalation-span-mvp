@@ -168,6 +168,7 @@ async def adjust_inventory(
                 "movement_id": movement["movement_id"],
                 "quantity_delta": request.quantity_delta,
                 "reason": request.reason,
+                "idempotency_key": request.idempotency_key,
             },
         )
         return movement
@@ -234,6 +235,10 @@ async def commit_inventory_reservation(reservation_id: str):
         span.set_attribute("inventory.reservation_id", reservation_id)
         try:
             reservation = await inventory_store.commit(reservation_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail="Reservation not found"
+            ) from None
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from None
 
