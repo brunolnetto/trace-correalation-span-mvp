@@ -20,7 +20,7 @@ DuckDB database in `analytics-data`. It does not modify the raw JSONL.
 
 ## Run locally
 
-Install the pinned adapter:
+Install the pinned dbt Core, DuckDB adapter, and DuckDB engine versions:
 
 ```bash
 python -m pip install -r analytics/requirements.txt
