@@ -392,7 +392,7 @@ def emit_events(
     *,
     run_id: str | None = None,
 ) -> dict[str, Any]:
-    effective_run_id = run_id or effective_run_id
+    effective_run_id = run_id or config.run_id
     for attempt in attempts:
         print(
             json.dumps(
