@@ -172,7 +172,9 @@ async def test_supplier_catalog_onboarding_creates_product_and_reorder_policy(cl
 
 
 @pytest.mark.asyncio
-async def test_onboarding_recovers_catalog_write_after_supplier_simulator_restart(client):
+async def test_onboarding_recovers_catalog_write_after_supplier_simulator_restart(
+    client
+):
     first_simulation = SupplierSimulation()
     first = await first_simulation.onboard_product("FILTER-100", client, "corr")
     restarted_simulation = SupplierSimulation()
