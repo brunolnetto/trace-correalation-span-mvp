@@ -102,6 +102,20 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
             response.raise_for_status()
             product = response.json()
     except httpx.HTTPStatusError as exc:
+        failure_category = (
+            "product_not_found"
+            if exc.response.status_code == 404
+            else "product_catalog_rejected"
+        )
+        logger.warning(
+            "order.process.preflight_rejected",
+            extra={
+                "order_id": order_id,
+                "product_id": request.product_id,
+                "quantity": request.quantity,
+                "failure_category": failure_category,
+            },
+        )
         if exc.response.status_code == 404:
             raise HTTPException(
                 status_code=404, detail="Product not found."
@@ -110,11 +124,29 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
             status_code=502, detail="Product catalog rejected the lookup."
         ) from None
     except httpx.HTTPError:
+        logger.exception(
+            "order.process.preflight_rejected",
+            extra={
+                "order_id": order_id,
+                "product_id": request.product_id,
+                "quantity": request.quantity,
+                "failure_category": "product_catalog_unavailable",
+            },
+        )
         raise HTTPException(
             status_code=503, detail="Product catalog is temporarily unavailable."
         ) from None
 
     if not product["is_active"]:
+        logger.warning(
+            "order.process.preflight_rejected",
+            extra={
+                "order_id": order_id,
+                "product_id": request.product_id,
+                "quantity": request.quantity,
+                "failure_category": "product_inactive",
+            },
+        )
         raise HTTPException(status_code=409, detail="Product is inactive.")
 
     unit_price = Decimal(str(product["unit_price"])).quantize(Decimal("0.01"))
@@ -131,6 +163,10 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
         "order.process.started",
         extra={
             "order_id": order_id,
+            "product_id": request.product_id,
+            "quantity": request.quantity,
+            "unit_price": str(unit_price),
+            "total_amount": str(amount),
             "saga_id": saga_id,
         },
     )
@@ -153,6 +189,10 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
             "order.process.failed",
             extra={
                 "order_id": order_id,
+                "product_id": request.product_id,
+                "quantity": request.quantity,
+                "unit_price": str(unit_price),
+                "total_amount": str(amount),
                 "saga_id": saga_id,
                 "incomplete_compensations": incomplete_compensations,
                 "failure_category": failure_category,
@@ -220,6 +260,9 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
         "order.process.completed",
         extra={
             "order_id": order_id,
+            "product_id": request.product_id,
+            "quantity": request.quantity,
+            "unit_price": str(unit_price),
             "saga_id": saga_id,
             "payment_id": result["payment_id"],
             "reservation_id": result["reservation_id"],
