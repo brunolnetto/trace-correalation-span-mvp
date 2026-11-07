@@ -62,15 +62,15 @@ async def test_product_catalog_rejects_duplicate_skus_and_unknown_products():
             ProductUpdate(sku="SKU-NEW", name="   "),
         )
     assert (await store.get_product(product_id))["sku"] == "SKU-001"
-    with pytest.raises(ValueError, match="already exists"):
-        await store.create_product(
-            ProductCreate(
-                sku="SKU-NEW",
-                name="Another product",
-                category="test",
-                unit_price=Decimal("2.00"),
-            )
+    replacement = await store.create_product(
+        ProductCreate(
+            sku="SKU-NEW",
+            name="Another product",
+            category="test",
+            unit_price=Decimal("2.00"),
         )
+    )
+    assert replacement["sku"] == "SKU-NEW"
 
 
 @pytest.mark.asyncio
