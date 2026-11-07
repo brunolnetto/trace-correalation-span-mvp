@@ -48,9 +48,19 @@ def install_inventory_mock(
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        if request.method == "POST":
+        if request.method == "GET":
             if product_not_found:
                 return httpx.Response(404, json={"detail": "product not found"})
+            return httpx.Response(
+                200,
+                json={
+                    "product_id": 7,
+                    "sku": "DEMO-007",
+                    "unit_price": "99.90",
+                    "is_active": True,
+                },
+            )
+        if request.method == "POST":
             if reject_reservation:
                 return httpx.Response(409, json={"detail": "insufficient inventory"})
             return httpx.Response(
@@ -82,7 +92,7 @@ def install_inventory_mock(
     return requests
 
 
-async def post_order(correlation_id: str, amount: float = 99.0):
+async def post_order(correlation_id: str, quantity: int = 2):
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=order_app),
         base_url="http://order.test",
@@ -90,7 +100,7 @@ async def post_order(correlation_id: str, amount: float = 99.0):
         return await client.post(
             "/orders/123/process",
             headers={"X-Correlation-ID": correlation_id},
-            json={"product_id": 7, "quantity": 2, "amount": amount},
+            json={"product_id": 7, "quantity": quantity},
         )
 
 
@@ -109,7 +119,7 @@ async def test_process_order_returns_saga_result_and_correlation_id(monkeypatch)
     assert body["saga_id"]
     assert body["reservation_id"] == "reservation-api-test"
     assert body["payment_id"]
-    assert [request.method for request in requests] == ["POST"]
+    assert [request.method for request in requests] == ["GET", "POST"]
     assert requests[0].headers["X-Correlation-ID"] == correlation_id
 
 
@@ -118,14 +128,14 @@ async def test_payment_decline_returns_402_after_inventory_compensation(monkeypa
     requests = install_inventory_mock(monkeypatch)
     correlation_id = "550e8400-e29b-41d4-a716-446655440302"
 
-    response = await post_order(correlation_id, amount=1001.0)
+    response = await post_order(correlation_id, quantity=11)
 
     assert response.status_code == 402
     assert response.headers["X-Correlation-ID"] == correlation_id
     assert response.json()["detail"] == (
         "Payment declined; completed actions were compensated."
     )
-    assert [request.method for request in requests] == ["POST", "DELETE"]
+    assert [request.method for request in requests] == ["GET", "POST", "DELETE"]
 
 
 @pytest.mark.asyncio
@@ -134,7 +144,7 @@ async def test_failed_compensation_returns_reconciliation_details(monkeypatch):
 
     response = await post_order(
         "550e8400-e29b-41d4-a716-446655440303",
-        amount=1001.0,
+        quantity=11,
     )
 
     assert response.status_code == 500
@@ -155,7 +165,7 @@ async def test_inventory_conflict_returns_409_without_charging_payment(monkeypat
     )
 
     assert response.status_code == 409
-    assert [request.method for request in requests] == ["POST"]
+    assert [request.method for request in requests] == ["GET", "POST"]
     assert workflow._orders == {}
 
 
@@ -169,5 +179,5 @@ async def test_unknown_product_returns_404_without_charging_payment(monkeypatch)
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Product not found."
-    assert [request.method for request in requests] == ["POST"]
+    assert [request.method for request in requests] == ["GET"]
     assert workflow._orders == {}
