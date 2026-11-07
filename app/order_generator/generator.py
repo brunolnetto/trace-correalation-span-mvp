@@ -9,10 +9,13 @@ import statistics
 import sys
 import time
 from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import NAMESPACE_URL, uuid5
 
 import httpx
+
+from app.event_publisher import build_event_envelope
 
 Mode = Literal["random", "coverage"]
 
@@ -36,6 +39,7 @@ class GeneratorConfig:
     success_quantity: int = 2
     decline_quantity: int = 11
     insufficient_quantity: int = 999_999
+    event_collector_url: str | None = None
 
     def __post_init__(self) -> None:
         if self.mode not in {"random", "coverage"}:
@@ -56,6 +60,25 @@ class GeneratorConfig:
             raise ValueError("coverage quantities must be positive")
         if not self.order_api_url.startswith(("http://", "https://")):
             raise ValueError("order_api_url must be an HTTP(S) URL")
+        if self.event_collector_url and not self.event_collector_url.startswith(
+            ("http://", "https://")
+        ):
+            raise ValueError("event_collector_url must be an HTTP(S) URL")
+
+    @property
+    def run_id(self) -> str:
+        return str(
+            uuid5(
+                NAMESPACE_URL,
+                (
+                    f"order-generator-run:{self.mode}:{self.seed}:"
+                    f"{self.product_id}:{self.first_order_id}:{self.count}:"
+                    f"{self.min_quantity}:{self.max_quantity}:"
+                    f"{self.success_quantity}:{self.decline_quantity}:"
+                    f"{self.insufficient_quantity}"
+                ),
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -268,6 +291,7 @@ def summarize(
     )
     return {
         "event": "order_generator.summary",
+        "run_id": config.run_id,
         "mode": config.mode,
         "seed": config.seed,
         "product_id": config.product_id,
@@ -286,16 +310,85 @@ def summarize(
     }
 
 
+def build_generator_events(
+    config: GeneratorConfig,
+    attempts: list[OrderAttempt],
+    summary: dict[str, Any],
+) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for attempt in attempts:
+        source = {
+            "timestamp": datetime.now(UTC).isoformat(),
+            "level": "INFO",
+            "service": "order-generator",
+            "logger": "app.order_generator",
+            "message": "order_generator.attempt",
+            "correlation_id": attempt.correlation_id,
+            "trace_id": None,
+            "span_id": None,
+            "attributes": {
+                **attempt.to_dict(),
+                "run_id": config.run_id,
+                "mode": config.mode,
+                "seed": config.seed,
+            },
+        }
+        events.append(build_event_envelope(source))
+
+    summary_source = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "level": "INFO",
+        "service": "order-generator",
+        "logger": "app.order_generator",
+        "message": "order_generator.summary",
+        "correlation_id": None,
+        "trace_id": None,
+        "span_id": None,
+        "attributes": summary,
+    }
+    events.append(build_event_envelope(summary_source))
+    return events
+
+
+async def publish_generator_events(
+    client: httpx.AsyncClient,
+    events: list[dict[str, Any]],
+) -> dict[str, int]:
+    accepted = 0
+    duplicates = 0
+    for start in range(0, len(events), 500):
+        batch = events[start : start + 500]
+        for attempt in range(3):
+            try:
+                response = await client.post("/v1/events", json={"events": batch})
+                response.raise_for_status()
+                result = response.json()
+                if result.get("quarantined", 0) or result.get("conflicts", 0):
+                    raise ValueError("Collector quarantined generated events")
+                accepted += result.get("accepted", 0)
+                duplicates += result.get("duplicates", 0)
+                break
+            except (httpx.HTTPError, ValueError) as exc:
+                if attempt == 2:
+                    raise RuntimeError(
+                        f"Could not publish generator event batch: {exc}"
+                    ) from exc
+                await asyncio.sleep(0.1 * (2**attempt))
+    return {"accepted": accepted, "duplicates": duplicates}
+
+
 def emit_events(
     config: GeneratorConfig,
     plan: list[OrderCommand],
     attempts: list[OrderAttempt],
+    summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     for attempt in attempts:
         print(
             json.dumps(
                 {
                     "event": "order_generator.attempt",
+                    "run_id": config.run_id,
                     "mode": config.mode,
                     "seed": config.seed,
                     **attempt.to_dict(),
@@ -303,9 +396,10 @@ def emit_events(
                 sort_keys=True,
             )
         )
-    summary = summarize(config, plan, attempts)
-    print(json.dumps(summary, sort_keys=True))
-    return summary
+    result = summary if summary is not None else summarize(config, plan, attempts)
+    result.setdefault("run_id", config.run_id)
+    print(json.dumps(result, sort_keys=True))
+    return result
 
 
 async def run(config: GeneratorConfig) -> dict[str, Any]:
@@ -315,7 +409,30 @@ async def run(config: GeneratorConfig) -> dict[str, Any]:
         timeout=httpx.Timeout(10.0, connect=3.0),
     ) as client:
         attempts = await execute_plan(client, plan)
-    return emit_events(config, plan, attempts)
+
+    summary = summarize(config, plan, attempts)
+    summary["run_id"] = config.run_id
+    if config.event_collector_url:
+        events = build_generator_events(config, attempts, summary)
+        try:
+            async with httpx.AsyncClient(
+                base_url=config.event_collector_url.rstrip("/"),
+                timeout=httpx.Timeout(5.0, connect=2.0),
+            ) as collector:
+                delivery = await publish_generator_events(collector, events)
+            summary["collector_delivery"] = {
+                "status": "delivered",
+                "event_count": len(events),
+                **delivery,
+            }
+        except (httpx.HTTPError, RuntimeError) as exc:
+            summary["collector_delivery"] = {
+                "status": "failed",
+                "event_count": len(events),
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+            summary["exit_code"] = 1
+    return emit_events(config, plan, attempts, summary)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -325,6 +442,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--order-api-url",
         default=os.getenv("ORDER_API_URL", "http://localhost:18000"),
+    )
+    parser.add_argument(
+        "--event-collector-url",
+        default=os.getenv("EVENT_COLLECTOR_URL"),
     )
     parser.add_argument(
         "--mode",
@@ -394,6 +515,7 @@ def main(argv: list[str] | None = None) -> int:
             success_quantity=args.success_quantity,
             decline_quantity=args.decline_quantity,
             insufficient_quantity=args.insufficient_quantity,
+            event_collector_url=args.event_collector_url,
         )
         summary = asyncio.run(run(config))
     except (ValueError, httpx.InvalidURL) as exc:
