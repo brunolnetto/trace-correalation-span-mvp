@@ -4,7 +4,7 @@ import logging
 import os
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query, status
+from fastapi import FastAPI, HTTPException, Query
 
 from app.observability import configure_observability, correlation_id_context
 from app.supplier_simulator.store import (
