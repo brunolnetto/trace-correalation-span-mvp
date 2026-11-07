@@ -105,7 +105,7 @@ async def get_inventory(product_id: int):
                 "product_id": product_id,
                 "on_hand": inventory["on_hand"],
                 "reserved": inventory["reserved"],
-                "available_quantity": inventory["available"],
+                "available_quantity": inventory["available_quantity"],
             },
         )
         return inventory
