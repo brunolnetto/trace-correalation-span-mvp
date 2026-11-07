@@ -16,6 +16,8 @@ with extracted as (
         json_extract_string(attributes, '$.total_amount') as total_amount_text,
         json_extract_string(attributes, '$.failure_category')
             as failure_category,
+        json_extract(attributes, '$.incomplete_compensations')
+            as incomplete_compensations,
         json_extract_string(source, '$.exception') as exception
     from {{ ref('stg_raw_events') }}
     where correlation_id is not null
@@ -77,6 +79,14 @@ aggregated as (
             end
         ) as was_inventory_rejected,
         max(failure_category) as failure_category,
+        max(
+            case
+                when incomplete_compensations is not null
+                 and json_array_length(incomplete_compensations) > 0
+                then 1
+                else 0
+            end
+        ) as compensation_incomplete,
         count(*) as event_count,
         count(distinct trace_id) as trace_count,
         string_agg(distinct service, ',') as source_services
@@ -95,6 +105,7 @@ select
     total_amount,
     case
         when was_completed = 1 then 'processed'
+        when compensation_incomplete = 1 then 'compensation_incomplete'
         when failure_category is not null then failure_category
         when was_inventory_rejected = 1 then 'inventory_rejected'
         when was_failed = 1 then 'failed'
