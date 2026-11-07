@@ -158,7 +158,9 @@ async def get_purchase_order(purchase_order_id: str):
     try:
         return await simulation.get_purchase_order(purchase_order_id)
     except KeyError:
-        raise HTTPException(status_code=404, detail="Purchase order not found.") from None
+        raise HTTPException(
+            status_code=404, detail="Purchase order not found."
+        ) from None
 
 
 @app.post(
