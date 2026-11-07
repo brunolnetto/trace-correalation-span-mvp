@@ -187,7 +187,9 @@ async def test_onboarding_recovers_catalog_write_after_supplier_simulator_restar
 
 
 @pytest.mark.asyncio
-async def test_purchase_order_cannot_be_cancelled_after_ordering(client, inventory_double):
+async def test_purchase_order_cannot_be_cancelled_after_ordering(
+    client, inventory_double
+):
     simulation = SupplierSimulation()
     await simulation.set_policy(
         ReorderPolicy(
