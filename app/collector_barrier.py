@@ -119,7 +119,7 @@ async def wait_for_collector_events(
                 payload = response.json()
             records = payload.get("events")
             if not isinstance(records, list):
-                raise ValueError("Collector response has no events list")
+                raise TypeError("Collector response has no events list")
             assessment = assess_events(records, expected)
             last_error = None
             if assessment["complete"]:
@@ -132,7 +132,7 @@ async def wait_for_collector_events(
                     "completed_at": datetime.now(UTC).isoformat(),
                     "last_error": None,
                 }
-        except (httpx.HTTPError, ValueError, TimeoutError) as exc:
+        except (httpx.HTTPError, TypeError, ValueError, TimeoutError) as exc:
             last_error = f"{type(exc).__name__}: {exc}"
 
         remaining = timeout_seconds - (monotonic() - started)
