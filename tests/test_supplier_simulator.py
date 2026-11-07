@@ -117,7 +117,9 @@ async def test_replenishment_uses_available_stock_and_avoids_duplicate_open_orde
 
 
 @pytest.mark.asyncio
-async def test_supplier_lead_time_receipt_and_idempotent_replay(client, inventory_double):
+async def test_supplier_lead_time_receipt_and_idempotent_replay(
+    client, inventory_double
+):
     simulation = SupplierSimulation(
         initial_time=datetime(2026, 1, 1, tzinfo=UTC)
     )
