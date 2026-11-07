@@ -38,9 +38,26 @@ Inventory API
   |-- Reservations, Release, and Commit
   |-- Inventory Movement Ledger
 
-Order, Inventory, Supplier, and Event Collector services export OTLP traces
-to Jaeger and emit structured JSON logs. Order, Inventory, and Supplier logs
-are also forwarded asynchronously to the raw event collector.
+Supplier Simulation API
+  |-- Supplier Fixture Catalog
+  |-- Reorder Policies and Purchase Orders
+  |-- Simulated Lead-Time Clock
+  +-- Idempotent receipts through Inventory API
+
+Order, Inventory, and Supplier JSON logs
+  |
+  | bounded asynchronous publisher
+  v
+Event Collector
+  |-- Versioned Event Envelope
+  |-- Append-only JSONL + Quarantine
+  +-- Persistent Docker Volume
+         |
+         v
+      dbt + DuckDB Analytics
+
+Services export OTLP traces to Jaeger. Order, Inventory, and Supplier logs
+are forwarded asynchronously to the raw event collector.
 ```
 
 - **correlation_id** identifies the business operation across services.
