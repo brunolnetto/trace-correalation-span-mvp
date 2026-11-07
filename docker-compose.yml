@@ -153,5 +153,29 @@ services:
       event-collector:
         condition: service_healthy
 
+  analytics:
+    build:
+      context: .
+      dockerfile: analytics/Dockerfile
+    profiles: ["analytics"]
+    working_dir: /workspace
+    environment:
+      DUCKDB_PATH: /analytics-data/trace_events.duckdb
+    command:
+      - sh
+      - -c
+      - |
+        if [ -s /raw/events.jsonl ]; then
+          export RAW_EVENTS_PATH=/raw/events.jsonl
+        fi
+        dbt build --project-dir /workspace --profiles-dir /workspace
+    volumes:
+      - event-data:/raw:ro
+      - analytics-data:/analytics-data
+    depends_on:
+      event-collector:
+        condition: service_healthy
+
 volumes:
   event-data:
+  analytics-data:
