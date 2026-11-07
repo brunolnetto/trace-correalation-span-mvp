@@ -136,6 +136,8 @@ async def receive_inventory(product_id: int, request: InventoryReceiptRequest):
                 "receipt_id": receipt["receipt_id"],
                 "quantity": request.quantity,
                 "idempotency_key": request.idempotency_key,
+                "movement_type": "receipt",
+                "reference": request.reference,
             },
         )
         return receipt
@@ -169,6 +171,7 @@ async def adjust_inventory(
                 "quantity_delta": request.quantity_delta,
                 "reason": request.reason,
                 "idempotency_key": request.idempotency_key,
+                "movement_type": "adjustment",
             },
         )
         return movement
@@ -209,6 +212,8 @@ async def reserve_inventory(
                     "order_id": request.order_id,
                     "saga_id": request.saga_id,
                     "reason": str(exc),
+                    "quantity": request.quantity,
+                    "movement_type": "reservation_rejected",
                 },
             )
             raise HTTPException(status_code=409, detail=str(exc)) from None
@@ -221,6 +226,7 @@ async def reserve_inventory(
                 "saga_id": request.saga_id,
                 "reservation_id": reservation["reservation_id"],
                 "quantity": request.quantity,
+                "movement_type": "reservation_created",
             },
         )
         return reservation
@@ -246,7 +252,12 @@ async def commit_inventory_reservation(reservation_id: str):
             "inventory.reservation.committed",
             extra={
                 "reservation_id": reservation_id,
+                "product_id": reservation.get("product_id"),
+                "order_id": reservation.get("order_id"),
+                "saga_id": reservation.get("saga_id"),
+                "quantity": reservation.get("quantity"),
                 "status": reservation["status"],
+                "movement_type": "reservation_committed",
             },
         )
         return reservation
@@ -264,7 +275,16 @@ async def release_inventory(reservation_id: str):
             "inventory.reservation.released",
             extra={
                 "reservation_id": reservation_id,
+                "product_id": reservation.get("product_id"),
+                "order_id": reservation.get("order_id"),
+                "saga_id": reservation.get("saga_id"),
+                "quantity": reservation.get("quantity"),
                 "status": reservation["status"],
+                "movement_type": (
+                    "reservation_released"
+                    if reservation["status"] == "released"
+                    else reservation["status"]
+                ),
             },
         )
         return reservation

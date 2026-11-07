@@ -1,0 +1,24 @@
+name: trace_event_analytics
+version: "1.0.0"
+config-version: 2
+
+profile: trace_event_analytics
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+analysis-paths: ["analysis"]
+target-path: "target"
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+vars:
+  raw_events_path: "fixtures/fixture_events.jsonl"
+
+models:
+  trace_event_analytics:
+    staging:
+      +materialized: view
+    marts:
+      +materialized: table

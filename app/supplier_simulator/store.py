@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from uuid import uuid4
 
 import httpx
 from pydantic import BaseModel, Field
