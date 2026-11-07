@@ -198,3 +198,20 @@ async def test_unknown_product_returns_404_without_charging_payment(monkeypatch)
     assert response.json()["detail"] == "Product not found."
     assert [request.method for request in requests] == ["GET"]
     assert workflow._orders == {}
+
+
+@pytest.mark.asyncio
+async def test_client_cannot_override_catalog_derived_total(monkeypatch):
+    requests = install_inventory_mock(monkeypatch)
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=order_app),
+        base_url="http://order.test",
+    ) as client:
+        response = await client.post(
+            "/orders/123/process",
+            json={"product_id": 7, "quantity": 2, "amount": 0.01},
+        )
+
+    assert response.status_code == 422
+    assert requests == []
