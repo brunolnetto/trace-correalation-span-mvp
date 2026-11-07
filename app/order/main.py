@@ -137,15 +137,18 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
             ) from None
 
         if isinstance(exc, httpx.HTTPStatusError):
-            status_code = (
-                409
-                if exc.response.status_code == 409
-                else 502
-            )
-            raise HTTPException(
-                status_code=status_code,
-                detail="Inventory service rejected or failed the reservation.",
-            ) from None
+            inventory_status = exc.response.status_code
+            if inventory_status in {404, 409}:
+                status_code = inventory_status
+                detail = (
+                    "Product not found."
+                    if inventory_status == 404
+                    else "Inventory service rejected the reservation."
+                )
+            else:
+                status_code = 502
+                detail = "Inventory service failed the reservation."
+            raise HTTPException(status_code=status_code, detail=detail) from None
 
         if isinstance(exc, httpx.HTTPError):
             raise HTTPException(
