@@ -22,9 +22,9 @@ services:
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
-      - "16686:16686"
-      - "4317:4317"
-      - "4318:4318"
+      - "${JAEGER_UI_HOST_PORT:-16686}:16686"
+      - "${OTLP_GRPC_HOST_PORT:-4317}:4317"
+      - "${OTLP_HTTP_HOST_PORT:-4318}:4318"
 
   event-collector:
     build: .
