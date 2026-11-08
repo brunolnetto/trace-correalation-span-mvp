@@ -6,7 +6,6 @@ from pathlib import Path
 from uuid import uuid4
 
 import psycopg
-from psycopg.rows import dict_row
 import pytest
 from psycopg import sql
 from psycopg.conninfo import make_conninfo
@@ -49,7 +48,7 @@ def test_migrations_apply_to_empty_schema_repeat_and_reject_checksum_drift(
     isolated_postgres_schema: str,
     tmp_path: Path,
 ) -> None:
-    with psycopg.connect(isolated_postgres_schema, row_factory=dict_row) as connection:
+    with psycopg.connect(isolated_postgres_schema) as connection:
         applied = apply_migrations(connection, MIGRATIONS_DIR)
         assert applied == [
             "0001_core_persistence",
@@ -57,7 +56,7 @@ def test_migrations_apply_to_empty_schema_repeat_and_reject_checksum_drift(
         ]
 
         tables = {
-            row["table_name"]
+            row[0]
             for row in connection.execute(
                 """
                 SELECT table_name
@@ -79,7 +78,7 @@ def test_migrations_apply_to_empty_schema_repeat_and_reject_checksum_drift(
         assert apply_migrations(connection, MIGRATIONS_DIR) == []
         migration_count = connection.execute(
             "SELECT count(*) AS count FROM schema_migrations"
-        ).fetchone()["count"]
+        ).fetchone()[0]
         assert migration_count == 2
 
     altered_migrations = tmp_path / "migrations"
