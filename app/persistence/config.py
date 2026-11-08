@@ -49,14 +49,21 @@ class DatabaseSettings:
                     "DATABASE_URL must be a PostgreSQL URL with a hostname"
                 )
 
+        pool_min_size = _positive_int_env("DATABASE_POOL_MIN_SIZE", 1)
+        pool_max_size = _positive_int_env("DATABASE_POOL_MAX_SIZE", 10)
+        if pool_min_size > pool_max_size:
+            raise PersistenceConfigurationError(
+                "DATABASE_POOL_MIN_SIZE cannot exceed DATABASE_POOL_MAX_SIZE"
+            )
+
         return cls(
             backend=backend,
             database_url=database_url,
             connect_timeout_seconds=_positive_int_env(
                 "DATABASE_CONNECT_TIMEOUT_SECONDS", 5
             ),
-            pool_min_size=_positive_int_env("DATABASE_POOL_MIN_SIZE", 1),
-            pool_max_size=_positive_int_env("DATABASE_POOL_MAX_SIZE", 10),
+            pool_min_size=pool_min_size,
+            pool_max_size=pool_max_size,
         )
 
 
