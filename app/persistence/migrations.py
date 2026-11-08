@@ -50,9 +50,13 @@ def apply_migrations(
             "SELECT version, checksum FROM schema_migrations"
         ).fetchall()
         existing = {
-            row["version"]: row["checksum"].strip()
-            if isinstance(row, dict)
-            else row[1].strip()
+            (
+                row["version"] if isinstance(row, dict) else row[0]
+            ): (
+                row["checksum"].strip()
+                if isinstance(row, dict)
+                else row[1].strip()
+            )
             for row in existing_rows
         }
 
