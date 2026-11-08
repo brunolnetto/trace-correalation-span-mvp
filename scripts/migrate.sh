@@ -12,4 +12,4 @@ export PGDATABASE="${PGDATABASE:-${POSTGRES_DB:-app}}"
 export PGUSER="${PGUSER:-${POSTGRES_USER:-app}}"
 export PGPASSWORD="${PGPASSWORD:-${POSTGRES_PASSWORD:-app}}"
 
-python -m app.persistence.migrations
+uv run --locked python -m app.persistence.migrations
