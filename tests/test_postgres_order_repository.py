@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterator
 from decimal import Decimal
 from uuid import UUID, uuid4
 
@@ -19,7 +20,7 @@ from app.persistence.migrations import MIGRATIONS_DIR, apply_migrations
 
 
 @pytest.fixture
-def postgres_order_schema_url() -> str:
+def postgres_order_schema_url() -> Iterator[str]:
     database_url = os.getenv("POSTGRES_TEST_URL")
     if not database_url:
         pytest.skip("POSTGRES_TEST_URL is required for PostgreSQL integration tests")
@@ -219,6 +220,7 @@ async def test_order_api_persists_success_and_catalog_failure_without_contract_c
 
     try:
         async with order_module.lifespan(order_module.app):
+            assert await order_module.database_manager.healthy()
             inventory = PostgresInventoryStore(order_module.database_manager)
             await inventory.seed_demo_data()
             reservation = await inventory.reserve(
