@@ -4,7 +4,6 @@ import os
 from decimal import Decimal
 from itertools import count
 from uuid import UUID, uuid4
-from pathlib import Path
 
 import httpx
 import psycopg
@@ -13,7 +12,7 @@ from psycopg import sql
 from psycopg.conninfo import make_conninfo
 
 from app.inventory.postgres_store import PostgresInventoryStore
-from app.inventory.store import InventoryReservationRequest
+from app.inventory.store import InventoryReservationRequest, ProductCreate
 from app.order.repository import PostgresOrderRepository
 from app.persistence.config import DatabaseSettings
 from app.persistence.database import DatabaseManager
@@ -91,7 +90,7 @@ async def test_order_repository_create_update_and_read_survive_pool_restart(
     try:
         inventory = PostgresInventoryStore(manager)
         product = await inventory.create_product(
-            __import__("app.inventory.store", fromlist=["ProductCreate"]).ProductCreate(
+            ProductCreate(
                 sku="ORDER-REPO-001",
                 name="Order repository fixture",
                 category="integration",
