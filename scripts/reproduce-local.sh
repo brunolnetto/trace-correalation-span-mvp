@@ -19,6 +19,7 @@ INVENTORY_URL="${INVENTORY_URL:-http://127.0.0.1:18001}"
 JAEGER_URL="${JAEGER_URL:-http://127.0.0.1:16686}"
 SUPPLIER_URL="${SUPPLIER_URL:-http://127.0.0.1:18002}"
 EVENT_COLLECTOR_URL="${EVENT_COLLECTOR_URL:-http://127.0.0.1:18003}"
+export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-15432}"
 WAIT_SECONDS="${WAIT_SECONDS:-60}"
 CLEANUP=0
 
@@ -71,7 +72,7 @@ fi
 
 echo "==> 2/7: Start PostgreSQL and run unit/integration tests"
 docker compose up --detach --wait postgres
-POSTGRES_TEST_URL="${POSTGRES_TEST_URL:-postgresql://app:app@127.0.0.1:15432/app}" \
+POSTGRES_TEST_URL="${POSTGRES_TEST_URL:-postgresql://app:app@127.0.0.1:${POSTGRES_HOST_PORT}/app}" \
   uv run --python 3.12 pytest
 
 echo "==> 3/7: Run Ruff"
