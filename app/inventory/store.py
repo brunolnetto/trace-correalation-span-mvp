@@ -8,6 +8,14 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.inventory.rules import (
+    adjusted_on_hand,
+    normalize_product_changes,
+    normalize_product_fields,
+    validate_commit_balance,
+    validate_reservation,
+)
+
 DEMO_PRODUCT_ID = 7
 DEMO_STOCK = 42
 
@@ -157,11 +165,11 @@ class InventoryStore:
         }
 
     async def create_product(self, request: ProductCreate) -> dict[str, Any]:
-        sku = request.sku.strip().upper()
-        name = request.name.strip()
-        category = request.category.strip()
-        if not sku or not name or not category:
-            raise ValueError("Product fields cannot contain only whitespace")
+        sku, name, category = normalize_product_fields(
+            request.sku,
+            request.name,
+            request.category,
+        )
 
         async with self._lock:
             if sku in self._sku_index:
@@ -203,26 +211,17 @@ class InventoryStore:
     async def update_product(
         self, product_id: int, request: ProductUpdate
     ) -> dict[str, Any]:
-        changes = request.model_dump(exclude_unset=True)
-        if any(value is None for value in changes.values()):
-            raise ValueError("Product fields cannot be null")
+        changes = normalize_product_changes(
+            request.model_dump(exclude_unset=True)
+        )
 
         async with self._lock:
             product = self._require_product_locked(product_id)
             if "sku" in changes:
-                sku = changes["sku"].strip().upper()
-                if not sku:
-                    raise ValueError("SKU cannot contain only whitespace")
+                sku = changes["sku"]
                 owner = self._sku_index.get(sku)
                 if owner is not None and owner != product_id:
                     raise ValueError(f"SKU {sku} already exists")
-                changes["sku"] = sku
-
-            for field in ("name", "category"):
-                if field in changes:
-                    changes[field] = changes[field].strip()
-                    if not changes[field]:
-                        raise ValueError(f"{field} cannot contain only whitespace")
 
             if "sku" in changes:
                 self._sku_index.pop(product["sku"], None)
@@ -293,15 +292,13 @@ class InventoryStore:
                 return existing.copy()
 
             balance = self._balances[product_id]
-            adjusted_on_hand = balance["on_hand"] + request.quantity_delta
-            if adjusted_on_hand < 0:
-                raise ValueError("Adjustment cannot make on-hand stock negative")
-            if adjusted_on_hand < balance["reserved"]:
-                raise ValueError(
-                    "Adjustment cannot reduce on-hand below reserved quantity"
-                )
+            adjusted = adjusted_on_hand(
+                on_hand=balance["on_hand"],
+                reserved=balance["reserved"],
+                quantity_delta=request.quantity_delta,
+            )
 
-            balance["on_hand"] = adjusted_on_hand
+            balance["on_hand"] = adjusted
             movement = self._append_movement_locked(
                 product_id=product_id,
                 movement_type="adjustment",
@@ -336,13 +333,13 @@ class InventoryStore:
                     raise ValueError("Reservation idempotency key is already consumed")
                 return existing.copy()
 
-            if not product["is_active"]:
-                raise ValueError("Product is inactive")
-
             balance = self._balances[product_id]
             available = balance["on_hand"] - balance["reserved"]
-            if request.quantity > available:
-                raise ValueError("Insufficient inventory")
+            validate_reservation(
+                product_is_active=product["is_active"],
+                quantity=request.quantity,
+                available_quantity=available,
+            )
 
             balance["reserved"] += request.quantity
             reservation = {
@@ -399,8 +396,11 @@ class InventoryStore:
             product_id = reservation["product_id"]
             quantity = reservation["quantity"]
             balance = self._balances[product_id]
-            if balance["on_hand"] < quantity or balance["reserved"] < quantity:
-                raise ValueError("Inventory balance is inconsistent")
+            validate_commit_balance(
+                on_hand=balance["on_hand"],
+                reserved=balance["reserved"],
+                quantity=quantity,
+            )
 
             balance["on_hand"] -= quantity
             balance["reserved"] -= quantity
