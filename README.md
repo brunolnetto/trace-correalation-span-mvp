@@ -201,8 +201,10 @@ compensation steps in the response. That condition requires reconciliation;
 it must not be interpreted as a successful rollback.
 
 Inventory reservations are idempotent for a given `saga_id` and product.
-The inventory store protects concurrent reservations with an async lock and
-rejects overselling within one process.
+The in-memory test double uses an async lock for single-process tests. The
+PostgreSQL adapter uses database row locks, transactional writes, and balance
+constraints to coordinate independent API workers/processes; see
+[the inventory concurrency contract](docs/inventory-concurrency.md).
 
 ## Deterministic order generator
 
@@ -611,9 +613,10 @@ or compensation-incomplete), including the requested product ID when catalog
 lookup fails. The balance is an operational projection and can be
 reconciled against the movement journal; the journal is a domain audit record,
 not full event sourcing. The in-memory `InventoryStore` remains available for
-unit tests and explicit development use. PostgreSQL row locks currently protect
-the multi-statement inventory writes, but the dedicated multi-process
-contention/no-oversell guarantees and tests remain in issue #22. Supplier
+unit tests and explicit development use. PostgreSQL row locks and balance constraints protect the multi-statement
+inventory writes; the dedicated multi-process contention, retry, and rollback
+acceptance suite is tracked in issue #22 and documented in
+[the inventory concurrency contract](docs/inventory-concurrency.md). Supplier
 policies and purchase-order lifecycle persistence remain in issue #23. The
 demo payment gateway remains a process-local simulation: persisting a payment
 reference on the order does not make payment state or external payment effects
