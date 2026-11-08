@@ -75,7 +75,7 @@ services:
       OTEL_TRACES_SAMPLER_ARG: "1.0"
       ENVIRONMENT: development
     ports:
-      - "127.0.0.1:18001:8001"
+      - "127.0.0.1:${INVENTORY_API_HOST_PORT:-18001}:8001"
     healthcheck:
       test:
         - CMD
@@ -109,7 +109,7 @@ services:
       OTEL_TRACES_SAMPLER_ARG: "1.0"
       ENVIRONMENT: development
     ports:
-      - "127.0.0.1:18000:8000"
+      - "127.0.0.1:${ORDER_API_HOST_PORT:-18000}:8000"
     healthcheck:
       test:
         - CMD
@@ -147,7 +147,7 @@ services:
       OTEL_TRACES_SAMPLER_ARG: "1.0"
       ENVIRONMENT: development
     ports:
-      - "127.0.0.1:18002:8002"
+      - "127.0.0.1:${SUPPLIER_HOST_PORT:-18002}:8002"
     healthcheck:
       test:
         - CMD
