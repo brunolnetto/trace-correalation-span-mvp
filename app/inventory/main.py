@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import logging
 import os
+from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Query, status
 from opentelemetry import trace
 
+from app.inventory.postgres_store import PostgresInventoryStore
 from app.inventory.store import (
     InventoryAdjustmentRequest,
     InventoryReceiptRequest,
@@ -15,6 +18,8 @@ from app.inventory.store import (
     ProductUpdate,
 )
 from app.observability import configure_observability
+from app.persistence.config import DatabaseSettings
+from app.persistence.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("inventory-api")
@@ -24,17 +29,46 @@ seed_demo_data = os.getenv("INVENTORY_SEED_DEMO_DATA", "false").lower() in {
     "yes",
 }
 inventory_store = InventoryStore(seed_demo_data=seed_demo_data)
+database_manager = DatabaseManager()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    global inventory_store
+
+    settings = DatabaseSettings.from_env()
+    await database_manager.open(settings)
+    try:
+        if settings.backend == "postgres":
+            postgres_store = PostgresInventoryStore(database_manager)
+            if seed_demo_data:
+                await postgres_store.seed_demo_data()
+            inventory_store = postgres_store
+        else:
+            inventory_store = InventoryStore(seed_demo_data=seed_demo_data)
+
+        app.state.inventory_store = inventory_store
+        yield
+    finally:
+        await database_manager.close()
+
 
 app = FastAPI(
     title="Inventory API",
     description="Product catalog and inventory lifecycle with correlated traces.",
     version="0.2.0",
+    lifespan=lifespan,
 )
 configure_observability(app, os.getenv("SERVICE_NAME", "inventory-api"))
 
 
 @app.get("/healthz", tags=["health"])
 async def healthcheck():
+    if not await database_manager.healthy():
+        raise HTTPException(
+            status_code=503,
+            detail="Database unavailable",
+        )
     return {"status": "ok", "service": "inventory-api"}
 
 
