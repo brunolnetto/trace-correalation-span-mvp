@@ -644,6 +644,15 @@ async def test_inventory_operations_are_safe_across_two_api_processes(
 
         movements = await store.list_movements(product_id, limit=100)
         assert len(movements) == 7
+        timeout_movements = [
+            movement
+            for movement in movements
+            if movement["idempotency_key"] == "multi-process-timeout-retry"
+        ]
+        assert len(timeout_movements) == 1
+        assert timeout_movements[0]["movement_id"] == retried_receipt.json()[
+            "receipt_id"
+        ]
         reconciliation = await store.reconcile(product_id)
         final_snapshot = await store.inventory_snapshot(product_id)
         assert reconciliation == {
