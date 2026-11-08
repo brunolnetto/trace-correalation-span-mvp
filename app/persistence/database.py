@@ -20,7 +20,8 @@ class DatabaseManager:
     deliberately has no pool, allowing existing unit tests to use InventoryStore.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, *, pool_name: str = "application") -> None:
+        self._pool_name = pool_name
         self._settings: DatabaseSettings | None = None
         self._pool: AsyncConnectionPool[AsyncConnection] | None = None
 
@@ -49,7 +50,7 @@ class DatabaseManager:
                 "row_factory": dict_row,
             },
             open=False,
-            name="inventory-api",
+            name=self._pool_name,
         )
         try:
             await pool.open(
