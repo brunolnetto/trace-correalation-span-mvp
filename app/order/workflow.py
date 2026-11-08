@@ -134,16 +134,24 @@ class CompensationTracker(SagaListener):
     def __init__(self) -> None:
         self._started: set[str] = set()
         self._completed: set[str] = set()
+        self._last_context: dict[str, Any] = {}
 
     async def on_compensation_start(
         self, saga_name: str, step_name: str, ctx: dict[str, Any]
     ) -> None:
         self._started.add(step_name)
+        self._last_context = dict(ctx)
 
     async def on_compensation_complete(
         self, saga_name: str, step_name: str, ctx: dict[str, Any]
     ) -> None:
         self._completed.add(step_name)
+        self._last_context = dict(ctx)
+
+    @property
+    def last_context(self) -> dict[str, Any]:
+        """Return the most recent context seen by a compensation callback."""
+        return dict(self._last_context)
 
     @property
     def incomplete_steps(self) -> list[str]:
