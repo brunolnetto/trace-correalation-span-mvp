@@ -124,10 +124,22 @@ async def _store_idempotency(
 class PostgresInventoryStore:
     """PostgreSQL implementation of the InventoryStore application contract.
 
-    Each public write is one database transaction. Row locks here protect the
-    projection/journal pair from lost updates; #22 remains responsible for the
-    explicit multi-process concurrency contract and its contention test suite.
+    Mutations run in the transaction owned by the pool connection context:
+    normal exit commits, and an exception rolls back every write in that
+    operation. PostgreSQL row locks and constraints coordinate independent API
+    workers/processes; no correctness invariant relies on an asyncio lock.
+
+    Inventory lock order is deliberately one-way:
+    - reserve: product -> reservation identity -> inventory balance;
+    - release/commit: reservation -> inventory balance;
+    - receipt/adjustment: inventory balance.
+
+    No inventory write path acquires these rows in reverse order. Reservation
+    creation currently locks the product row, serializing reservations for one
+    product while also coordinating with product deactivation. This favors a
+    simple correctness proof over maximum same-product reservation throughput.
     """
+
 
     def __init__(self, database: DatabaseManager) -> None:
         self.database = database
