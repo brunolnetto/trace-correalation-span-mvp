@@ -32,7 +32,7 @@ seed_demo_data = os.getenv("INVENTORY_SEED_DEMO_DATA", "false").lower() in {
 inventory_store: InventoryStorePort = InventoryStore(
     seed_demo_data=seed_demo_data
 )
-database_manager = DatabaseManager()
+database_manager = DatabaseManager(pool_name="inventory-api")
 
 
 @asynccontextmanager
