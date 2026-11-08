@@ -18,7 +18,6 @@ from app.inventory.store import (
     InventoryReservationRequest,
     ProductCreate,
     ProductUpdate,
-    utc_now,
 )
 from app.persistence.database import DatabaseManager
 
