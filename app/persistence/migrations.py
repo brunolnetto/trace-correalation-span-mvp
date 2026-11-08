@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Mapping
 import os
 import re
 from pathlib import Path
@@ -51,10 +52,10 @@ def apply_migrations(
         ).fetchall()
         existing = {
             (
-                row["version"] if isinstance(row, dict) else row[0]
+                row["version"] if isinstance(row, Mapping) else row[0]
             ): (
                 row["checksum"].strip()
-                if isinstance(row, dict)
+                if isinstance(row, Mapping)
                 else row[1].strip()
             )
             for row in existing_rows
