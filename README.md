@@ -131,8 +131,11 @@ different payload is rejected. Adjustments require a reason and cannot reduce
 physical stock below the already reserved quantity. Inactive products cannot
 be reserved, although their existing stock remains visible.
 
-The movement endpoint exposes the in-memory ledger for receipts, adjustments,
-reservations, releases, commits, and the demo opening balance.
+The movement endpoint exposes the append-only movement journal for receipts,
+adjustments, reservations, releases, commits, and the demo opening balance.
+With `PERSISTENCE_BACKEND=postgres`, the journal and its balance projection are
+stored durably in PostgreSQL and can be reconciled. The in-memory store remains
+available for unit tests and explicitly selected development runs.
 
 ### Reservation lifecycle and order processing
 
