@@ -171,15 +171,24 @@ that analytics is not started after simulation failure and that the Analytics
 Runner persists a failed run report and exits non-zero after dbt failure.
 It leaves named volumes intact.
 
-Only remove named volumes when you intentionally want to erase raw events,
-simulation/analytics reports, and DuckDB data:
-
 The Simulation Runner writes `simulation-report.json` to the `run-state` volume.
-The Analytics Runner writes `run-report.json` and dbt artifacts to
-`analytics-data`. Both reports remain available after the wrapper removes
-containers because the named volumes are preserved. The default scenario uses product 7, 42 opening units, eight
-initial two-unit orders, one 34-unit purchase order, four more two-unit orders
-during lead time, and a final inventory position of 52 after receipt.
+The Analytics Runner writes `run-report.json`, the DuckDB database, and dbt
+artifacts to the `analytics-data` volume. Both reports remain available after
+the wrapper removes containers because named volumes are preserved.
+
+To intentionally erase the raw event history, simulation and analytics reports,
+and DuckDB data, remove the named volumes as well:
+
+```bash
+docker compose down -v
+```
+
+**Warning:** this permanently deletes the persisted data in those volumes. Do
+not use `-v` for routine cleanup.
+
+The default scenario uses product 7 with 42 opening units, eight initial
+two-unit orders, one 34-unit purchase order, four more two-unit orders during
+lead time, and a final inventory position of 52 after receipt.
 
 The runner validates the opening balance and rejects a run if the product has
 pre-existing reservations or an active purchase order. Each run gets a distinct
