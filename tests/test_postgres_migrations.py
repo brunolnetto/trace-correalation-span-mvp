@@ -91,6 +91,8 @@ def test_migrations_apply_to_empty_schema_repeat_and_reject_checksum_drift(
         encoding="utf-8",
     )
 
-    with psycopg.connect(isolated_postgres_schema) as connection:
-        with pytest.raises(MigrationChecksumMismatch, match="Checksum mismatch"):
-            apply_migrations(connection, altered_migrations)
+    with (
+        psycopg.connect(isolated_postgres_schema) as connection,
+        pytest.raises(MigrationChecksumMismatch, match="Checksum mismatch"),
+    ):
+        apply_migrations(connection, altered_migrations)
