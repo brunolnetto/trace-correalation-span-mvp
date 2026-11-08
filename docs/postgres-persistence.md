@@ -84,8 +84,20 @@ docker compose up --build --detach
 ```
 
 The development defaults expose PostgreSQL on `127.0.0.1:15432` with database,
-user, and password `app`. Override these values for non-disposable
-environments. Do not use the defaults outside local development.
+user, and password `app`. Set `POSTGRES_HOST_PORT` to use another host port when
+15432 is already occupied; Compose, the migration script, and the reproduction
+script honor the override. For example:
+
+```bash
+POSTGRES_HOST_PORT=25432 docker compose up --detach --wait postgres
+POSTGRES_HOST_PORT=25432 \
+  POSTGRES_TEST_URL=postgresql://app:app@127.0.0.1:25432/app \
+  uv run --python 3.12 pytest
+POSTGRES_HOST_PORT=25432 bash scripts/migrate.sh
+```
+
+Override database credentials for non-disposable environments. Do not use the
+defaults outside local development.
 
 The migration runner can also be invoked directly:
 
@@ -105,7 +117,8 @@ needs permission to create and drop schemas. The tests cover first application,
 repeat execution, checksum drift, Inventory persistence, Order outcome
 create/update/read, catalog-failure capture, idempotency, append-only movement
 behavior, reconciliation, API contract preservation, and new pools after
-simulated process restart. CI provisions PostgreSQL and sets this variable.
+simulated process restart. CI provisions PostgreSQL and sets this variable. The end-to-end reproduction
+script accepts `POSTGRES_HOST_PORT=25432` when run against a non-default port.
 
 ## Order outcome persistence
 
