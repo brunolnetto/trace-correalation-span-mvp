@@ -584,8 +584,66 @@ async def test_inventory_operations_are_safe_across_two_api_processes(
             assert commit_response.status_code == 200
             assert commit_response.json()["status"] == "committed"
 
+        # Simulate a response timeout while the database transaction is
+        # still completing. Retrying the same key on the other process must
+        # either replay the committed response or safely perform the rolled-
+        # back operation, never crediting stock twice.
+        async with _manager.connection() as connection:
+            await connection.execute(
+                """
+                CREATE FUNCTION delay_timeout_receipt_idempotency()
+                RETURNS trigger
+                LANGUAGE plpgsql
+                AS $
+                BEGIN
+                    IF NEW.idempotency_key = 'multi-process-timeout-retry' THEN
+                        PERFORM pg_sleep(0.4);
+                    END IF;
+                    RETURN NEW;
+                END;
+                $
+                """
+            )
+            await connection.execute(
+                """
+                CREATE TRIGGER delay_timeout_receipt_idempotency
+                BEFORE INSERT ON idempotency_records
+                FOR EACH ROW
+                EXECUTE FUNCTION delay_timeout_receipt_idempotency()
+                """
+            )
+
+        before_timeout_retry = await store.inventory_snapshot(product_id)
+        async with httpx.AsyncClient(
+            base_url=str(clients[0].base_url), timeout=0.1
+        ) as impatient_client:
+            with pytest.raises(httpx.TimeoutException):
+                await impatient_client.post(
+                    f"/inventory/{product_id}/receipts",
+                    json={
+                        "quantity": 2,
+                        "idempotency_key": "multi-process-timeout-retry",
+                        "reference": "timeout-retry",
+                    },
+                )
+
+        # Allow the original request either to commit or to roll back before
+        # retrying from the second API process.
+        await asyncio.sleep(0.6)
+        retried_receipt = await clients[1].post(
+            f"/inventory/{product_id}/receipts",
+            json={
+                "quantity": 2,
+                "idempotency_key": "multi-process-timeout-retry",
+                "reference": "timeout-retry",
+            },
+        )
+        assert retried_receipt.status_code == 201
+        after_timeout_retry = await store.inventory_snapshot(product_id)
+        assert after_timeout_retry["on_hand"] == before_timeout_retry["on_hand"] + 2
+
         movements = await store.list_movements(product_id, limit=100)
-        assert len(movements) == 6
+        assert len(movements) == 7
         reconciliation = await store.reconcile(product_id)
         final_snapshot = await store.inventory_snapshot(product_id)
         assert reconciliation == {
