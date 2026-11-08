@@ -76,6 +76,12 @@ class DatabaseManager:
     def connection(
         self, *, timeout: float | None = None
     ) -> AbstractAsyncContextManager[AsyncConnection]:
+        """Check out a connection with a transaction-scoped pool context.
+
+        Psycopg commits when the context exits normally and rolls back when an
+        exception escapes it. Inventory mutations keep all projection,
+        reservation, journal, and idempotency writes inside this boundary.
+        """
         if self._pool is None:
             raise RuntimeError("PostgreSQL connection pool is not open")
         effective_timeout = timeout
