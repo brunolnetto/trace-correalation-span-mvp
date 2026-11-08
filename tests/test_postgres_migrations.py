@@ -8,7 +8,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 from psycopg import sql
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from app.persistence.migrations import (
     MIGRATIONS_DIR,
@@ -33,7 +33,7 @@ def isolated_postgres_schema():
     query = parse_qsl(parsed_url.query, keep_blank_values=True)
     query.append(("options", f"-c search_path={schema}"))
     isolated_url = urlunsplit(
-        parsed_url._replace(query=urlencode(query))
+        parsed_url._replace(query=urlencode(query, quote_via=quote))
     )
     try:
         yield isolated_url
