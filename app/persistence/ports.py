@@ -58,3 +58,43 @@ class OrderRepository(Protocol):
     async def update_outcome(
         self, order_id: int, outcome: dict[str, Any]
     ) -> dict[str, Any] | None: ...
+
+
+class InventoryStorePort(Protocol):
+    """Application-facing Inventory contract shared by memory and PostgreSQL."""
+
+    async def create_product(self, request: Any) -> dict[str, Any]: ...
+
+    async def list_products(
+        self, *, include_inactive: bool = False
+    ) -> list[dict[str, Any]]: ...
+
+    async def get_product(self, product_id: int) -> dict[str, Any]: ...
+
+    async def update_product(
+        self, product_id: int, request: Any
+    ) -> dict[str, Any]: ...
+
+    async def inventory_snapshot(self, product_id: int) -> dict[str, Any]: ...
+
+    async def available_quantity(self, product_id: int) -> int: ...
+
+    async def receive_stock(
+        self, product_id: int, request: Any
+    ) -> dict[str, Any]: ...
+
+    async def adjust_stock(
+        self, product_id: int, request: Any
+    ) -> dict[str, Any]: ...
+
+    async def reserve(
+        self, product_id: int, request: Any
+    ) -> dict[str, Any]: ...
+
+    async def release(self, reservation_id: str) -> dict[str, Any]: ...
+
+    async def commit(self, reservation_id: str) -> dict[str, Any]: ...
+
+    async def list_movements(
+        self, product_id: int, *, limit: int = 100
+    ) -> list[dict[str, Any]]: ...
