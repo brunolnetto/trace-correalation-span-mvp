@@ -11,6 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from sagaz import Saga, SagaConfig, action, compensate
 from sagaz.core.listeners import SagaListener
 
+from app.persistence.ports import OrderRepository
+
 INVENTORY_API_URL = os.getenv("INVENTORY_API_URL", "http://localhost:8001")
 PAYMENT_DECLINE_ABOVE = float(os.getenv("PAYMENT_DECLINE_ABOVE", "1000"))
 
@@ -74,10 +76,10 @@ class PaymentGateway:
 payment_gateway = PaymentGateway()
 _orders: dict[int, dict[str, Any]] = {}
 _order_lock = Lock()
-_order_repository: Any | None = None
+_order_repository: OrderRepository | None = None
 
 
-def configure_order_repository(repository: Any | None) -> None:
+def configure_order_repository(repository: OrderRepository | None) -> None:
     """Select the durable repository, or the in-memory test double."""
     global _order_repository
     _order_repository = repository
