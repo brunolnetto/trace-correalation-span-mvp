@@ -201,3 +201,77 @@ async def test_postgres_movement_journal_rejects_updates_and_deletes(
     movements = await store.list_movements(product_id)
     assert len(movements) == 1
     assert movements[0]["reference"] == "append-only-test"
+
+
+@pytest.mark.asyncio
+async def test_inventory_api_uses_postgres_repository_with_existing_http_contract(
+    postgres_schema_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from importlib import import_module
+
+    import httpx
+
+    inventory_module = import_module("app.inventory.main")
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("PERSISTENCE_BACKEND", "postgres")
+    monkeypatch.setenv("DATABASE_URL", postgres_schema_url)
+    monkeypatch.setenv("DATABASE_POOL_MIN_SIZE", "1")
+    monkeypatch.setenv("DATABASE_POOL_MAX_SIZE", "3")
+    monkeypatch.setattr(inventory_module, "seed_demo_data", False)
+
+    async with inventory_module.lifespan(inventory_module.app):
+        assert isinstance(
+            inventory_module.inventory_store,
+            PostgresInventoryStore,
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=inventory_module.app),
+            base_url="http://inventory.test",
+        ) as client:
+            health = await client.get("/healthz")
+            assert health.status_code == 200
+            assert health.json() == {
+                "status": "ok",
+                "service": "inventory-api",
+            }
+
+            created = await client.post(
+                "/products",
+                json={
+                    "sku": "API-POSTGRES-001",
+                    "name": "API PostgreSQL product",
+                    "category": "integration",
+                    "unit_price": "21.50",
+                },
+            )
+            assert created.status_code == 201
+            product = created.json()
+            assert {
+                "product_id",
+                "sku",
+                "name",
+                "category",
+                "unit_price",
+                "is_active",
+                "created_at",
+                "updated_at",
+            }.issubset(product)
+
+            product_id = product["product_id"]
+            receipt = await client.post(
+                f"/inventory/{product_id}/receipts",
+                json={
+                    "quantity": 8,
+                    "idempotency_key": "api-postgres-receipt",
+                    "reference": "API-PO-001",
+                },
+            )
+            assert receipt.status_code == 201
+            inventory = await client.get(f"/inventory/{product_id}")
+            assert inventory.status_code == 200
+            assert inventory.json()["on_hand"] == 8
+            assert inventory.json()["available_quantity"] == 8
+
+    # Shutdown closes the shared pool; the in-memory adapter remains the default
+    # when an isolated test imports the module without enabling PostgreSQL.
