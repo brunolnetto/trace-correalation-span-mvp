@@ -1,16 +1,34 @@
 # PostgreSQL persistence foundation
 
-This document records the implementation boundary for issue #21. PostgreSQL becomes the source of truth for the Order and Inventory domains; Event Collector JSONL files and dbt models remain observability/analytics products, never write authorities.
+This document tracks issue #21. PostgreSQL is the durable source of truth for
+Inventory business state. The Event Collector and dbt remain observability and
+analytics products, never write authorities.
 
 ## Decisions
 
-- Use one PostgreSQL database for the two services. Do not introduce a generic multi-database abstraction.
-- Keep domain validation and state transitions in the existing InventoryStore/Order workflow layer. Introduce repository interfaces and PostgreSQL implementations beneath those services; SQL and connection management must not leak into route handlers or Saga actions.
-- Use explicit, versioned SQL migrations. A migration ledger records each applied migration; applying migrations to an empty database must produce the same schema as upgrading an existing database.
-- Use database transactions for each aggregate write in this issue. This is required to keep a balance change, its movement record, and its idempotency result together. The separate #22 work remains responsible for the stronger multi-process inventory concurrency contract and its dedicated competing-process tests.
-- Store monetary values as NUMERIC, quantities as integers, timestamps as TIMESTAMPTZ, and idempotency responses as JSONB.
-- Keep the movement journal append-only. Corrections are compensating movements, never edits to historical rows.
-- Demo data is a separate, explicit bootstrap operation. A normal production startup only applies migrations; it never inserts catalog or stock records.
+- Use one PostgreSQL database for the Order and Inventory domains. Do not
+  introduce a generic multi-database abstraction.
+- Keep HTTP routes independent of SQL and connection management. Both the
+  in-memory `InventoryStore` and `PostgresInventoryStore` implement the
+  application-facing `InventoryStorePort`.
+- Keep shared product normalization, reservation eligibility, stock adjustment,
+  and commit-balance validation in `app/inventory/rules.py`. The PostgreSQL
+  adapter owns SQL and transaction boundaries; the in-memory adapter remains
+  available as the unit-test double.
+- Use explicit, versioned SQL migrations. The Python migration runner creates
+  and owns `schema_migrations`, takes a transaction-scoped advisory lock, and
+  records the SHA-256 checksum of each applied SQL file. Applied migrations
+  are immutable.
+- Each Inventory command that changes business state uses one transaction.
+  Balance projections, reservation state, movement rows, and idempotency
+  responses are committed or rolled back together.
+- Store monetary values as NUMERIC, quantities as integers, timestamps as
+  TIMESTAMPTZ, and replayable idempotency responses as JSONB.
+- Keep the movement journal append-only. Corrections are compensating movements,
+  never edits to historical rows.
+- Demo data is a separate, explicit bootstrap. A normal production startup
+  only opens the connection pool and checks database readiness; it does not
+  apply schema changes or seed catalog/stock records.
 
 ## Persistence model
 
@@ -23,36 +41,96 @@ This document records the implementation boundary for issue #21. PostgreSQL beco
 | idempotency_records | Scoped key, canonical request hash, and replayable response |
 | orders | Durable order input, catalog price snapshot, outcome, Saga/payment/reservation references |
 
-inventory_balances is an operational projection. For every product, on_hand must equal the sum of quantity_delta_on_hand across its movement journal, and reserved must equal the sum of quantity_delta_reserved. The repository layer exposes reconciliation to tests/diagnostics; it does not silently repair drift.
+`inventory_balances` is an operational projection. For each product,
+`on_hand` must equal the sum of `quantity_delta_on_hand` and `reserved` must
+equal the sum of `quantity_delta_reserved` in the movement journal. The
+Inventory adapter exposes reconciliation and does not silently repair drift.
 
-## Write boundaries
+## Connection lifecycle and health
 
-A product create inserts the product and its zero balance in one transaction. A receipt or adjustment writes its movement, updates the balance, and stores its idempotency response in one transaction. A reservation transition writes the reservation state, balance projection, and movement in one transaction. A completed/failed order outcome is persisted through an Order repository; the existing payment simulator remains a process-local test/demo adapter and is not expanded into a payment ledger by #21.
+`DatabaseSettings.from_env()` selects the backend and validates the PostgreSQL
+URL, connect timeout, and pool bounds. The defaults are intentionally different
+by environment:
 
-The idempotency key is unique within an operation scope. The canonical request hash distinguishes a legitimate replay from reuse of the same key with a different payload. Existing API response shapes and HTTP status semantics are preserved.
+- Development/test defaults to the in-memory adapter.
+- Production defaults to PostgreSQL and fails fast unless
+  `DATABASE_URL` is configured. An explicit in-memory production backend is
+  rejected; there is no silent fallback.
 
-## Migration and bootstrap lifecycle
+The Inventory FastAPI lifespan opens one `psycopg_pool.AsyncConnectionPool`
+per worker process and closes it on shutdown. Connections use dict rows. The
+`/healthz` endpoint performs a lightweight `SELECT 1` when PostgreSQL is
+selected and returns HTTP 503 if the database is unavailable. The database
+pool is created after the worker starts, not shared across forked processes.
 
-1. Start local PostgreSQL with `docker compose up --detach postgres`. The development defaults expose it on `127.0.0.1:15432` with database/user/password `app`; override `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` outside disposable local development.
-2. Run `bash scripts/migrate.sh`. The runner takes a transaction-scoped advisory lock, applies the versioned SQL migration, and records its SHA-256 checksum in `schema_migrations`. Re-running an unchanged migration is a no-op; changing an already-applied migration fails rather than silently mutating an existing database.
-3. Configure `DATABASE_URL` explicitly for each API before enabling repository-backed persistence. API startup does not mutate schema. For local integration tests, use a disposable PostgreSQL service and apply migrations.
-4. Run the explicit demo bootstrap only when INVENTORY_SEED_DEMO_DATA=true (or an explicit bootstrap command is invoked). It must be safe to re-run and must not overwrite an existing product or balance.
-5. Production configuration must fail fast when PostgreSQL is missing or unreachable. There is no implicit in-memory fallback.
+## Migration and local development
 
-## Implementation sequence
+The repository uses Psycopg 3 with the binary distribution and its separate
+async pool extra. Regenerate the lock after dependency changes:
 
-1. [In progress] Schema, PostgreSQL Compose service, checksum-verified migration runner, validated database settings, and repository Protocol contracts. Connection-pool lifecycle and migration-runner tests remain to be added.
-2. Inventory repository implementation and API wiring while preserving the existing in-memory test double.
-3. Order repository implementation and persistence of order outcomes.
-4. Explicit demo bootstrap and README operations guide.
-5. PostgreSQL integration tests for create/read/update/restart, movement immutability, idempotency replay/conflict, and balance/journal reconciliation.
+```bash
+uv lock --python 3.12
+uv sync --locked --all-groups
+```
 
-## Current implementation status
+For local Compose development, start PostgreSQL, apply migrations, then start
+the application services:
 
-- `DatabaseSettings.from_env()` validates the selected backend, PostgreSQL URL, timeout, and pool bounds. Production defaults to PostgreSQL and rejects an in-memory backend; development/test can retain the current in-memory test doubles.
-- Repository Protocols define the product, inventory, reservation, idempotency, and order boundaries. They are contracts only; no PostgreSQL adapter is wired into either API yet.
-- The PostgreSQL Compose service, initial schema, and checksum-verified migration script are present. The migration script expects the PostgreSQL service to be running and applies the migration under a transaction-scoped advisory lock.
-- No connection pool is opened by application startup yet. That is intentional until the psycopg dependency and lockfile can be updated together and lifecycle tests can run.
-- Configuration unit tests cover production fail-fast behavior, URL validation, and pool-size validation. They have been committed but not executed in this environment.
+```bash
+docker compose up --detach --wait postgres
+bash scripts/migrate.sh
+docker compose up --build --detach
+```
 
-#22 remains a separate milestone: tests that coordinate at least two Inventory API processes and prove no overselling under contention. #23 remains separate: supplier policy and purchase-order persistence.
+The development defaults expose PostgreSQL on `127.0.0.1:15432` with database,
+user, and password `app`. Override these values for non-disposable
+environments. Do not use the defaults outside local development.
+
+The migration runner can also be invoked directly:
+
+```bash
+DATABASE_URL=postgresql://app:app@127.0.0.1:15432/app \
+  uv run --locked python -m app.persistence.migrations
+```
+
+Re-running an unchanged migration is a no-op. Modifying an applied migration
+fails with `MigrationChecksumMismatch`; create a new numbered migration
+instead. API startup does not run migrations.
+
+For PostgreSQL integration tests, set `POSTGRES_TEST_URL` to a disposable
+database URL. Each test creates a unique temporary schema, applies migrations
+to that empty schema, and drops it afterward. The test database user therefore
+needs permission to create and drop schemas. The tests cover first application,
+repeat execution, checksum drift, Inventory persistence, idempotency,
+append-only movement behavior, reconciliation, and a new pool after simulated
+process restart. CI provisions PostgreSQL and sets this variable.
+
+## Inventory transaction boundaries
+
+- Product creation inserts the product and its zero balance in one transaction.
+- Receipts and adjustments lock the product balance, verify the idempotency
+  record, update the projection, append a movement, and store the replay result
+  in one transaction.
+- Reservation creation, release, and commit update the reservation, projection,
+  and movement journal in one transaction.
+- The movement journal has a database trigger that rejects UPDATE and DELETE.
+- Product, inventory, reservation, and movement response shapes remain
+  compatible with the existing Inventory HTTP API.
+
+The PostgreSQL adapter uses row-level locks to prevent a projection update from
+being lost while the associated movement/idempotency rows are written. The
+explicit multi-process contention and no-overselling acceptance suite remains
+in issue #22; this issue does not claim that broader concurrency milestone is
+complete.
+
+## Remaining in #21
+
+- Add repository-backed order outcome persistence and wire it into the Order
+  workflow without changing its HTTP contract.
+- Complete the README and operational behavior for production configuration,
+  backups, and local reset.
+- Run the repository's complete test/lint/reproduction suite against PostgreSQL
+  and inspect the CI result.
+
+Supplier policies and purchase-order lifecycle remain in issue #23. Transactional
+outbox delivery remains separately tracked.
