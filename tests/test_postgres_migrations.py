@@ -53,6 +53,7 @@ def test_migrations_apply_to_empty_schema_repeat_and_reject_checksum_drift(
         assert applied == [
             "0001_core_persistence",
             "0002_protect_movement_truncate",
+            "0003_persist_order_outcomes",
         ]
 
         tables = {
@@ -79,7 +80,7 @@ def test_migrations_apply_to_empty_schema_repeat_and_reject_checksum_drift(
         migration_count = connection.execute(
             "SELECT count(*) AS count FROM schema_migrations"
         ).fetchone()[0]
-        assert migration_count == 2
+        assert migration_count == 3
 
     altered_migrations = tmp_path / "migrations"
     shutil.copytree(MIGRATIONS_DIR, altered_migrations)
