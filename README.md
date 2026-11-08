@@ -469,9 +469,10 @@ Run the end-to-end reproduction from the repository root:
 bash scripts/reproduce-local.sh
 ```
 
-The script resolves/synchronizes dependencies, runs pytest and Ruff, builds
-and starts Jaeger, the Order/Inventory APIs, the Supplier Simulation API, and
-the Event Collector. It exercises a successful order, a payment decline with
+The script resolves/synchronizes dependencies, starts PostgreSQL for the
+migration and repository integration tests, runs pytest and Ruff, builds and
+starts Jaeger, the Order/Inventory APIs, the Supplier Simulation API, and the
+Event Collector. It applies the schema migration before starting the APIs. It exercises a successful order, a payment decline with
 compensation, an insufficient-stock rejection, supplier onboarding and
 replenishment through a simulated lead time, and the generator's three
 coverage scenarios. It verifies balances, correlated JSON logs, cross-service
@@ -495,13 +496,17 @@ lockfile is current first:
 
 ```bash
 uv lock --python 3.12
+docker compose up --detach --wait postgres
+bash scripts/migrate.sh
 docker compose up --build
 ```
 
 The APIs are exposed on host ports `18000` (Order), `18001` (Inventory),
 `18002` (Supplier Simulation), and `18003` (Event Collector). Jaeger UI is
-available on port `16686`. Compose explicitly enables
-`INVENTORY_SEED_DEMO_DATA`, which creates product 7 with 42 units. The
+available on port `16686`. The separate migration command runs before the APIs; API startup never applies
+schema changes. Compose configures the Inventory API to use PostgreSQL and
+explicitly enables `INVENTORY_SEED_DEMO_DATA`, which creates product 7 with
+42 units only when the database has no corresponding demo movements. The
 Inventory API does not assume stock for unknown product IDs.
 
 ## Run without Docker
@@ -513,16 +518,29 @@ uv lock --python 3.12
 uv sync --locked --all-groups
 ```
 
-Start Jaeger separately with OTLP enabled, then run each API in a separate
-terminal. To reproduce the seeded demo product outside Compose, set
-`INVENTORY_SEED_DEMO_DATA=true` for the Inventory API:
+Start PostgreSQL and apply the schema migration before starting the Inventory
+API. The development database defaults below are disposable local credentials:
 
 ```bash
+docker compose up --detach --wait postgres
+bash scripts/migrate.sh
+```
+
+Start Jaeger separately with OTLP enabled, then run each API in a separate
+terminal. To use PostgreSQL outside Compose and reproduce the seeded demo
+product, explicitly configure the Inventory API:
+
+```bash
+PERSISTENCE_BACKEND=postgres \
+DATABASE_URL=postgresql://app:app@localhost:15432/app \
 INVENTORY_SEED_DEMO_DATA=true \
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces \
 SERVICE_NAME=inventory-api \
 uv run uvicorn app.inventory.main:app --port 8001
 ```
+
+In non-production development/test runs, the default backend remains the
+in-memory test double unless `PERSISTENCE_BACKEND=postgres` is selected.
 
 ```bash
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces \
@@ -542,7 +560,13 @@ uv run uvicorn app.order.main:app --port 8000
 | `ENVIRONMENT` | `development` | OTel deployment environment |
 | `LOG_LEVEL` | `INFO` | Python logging level |
 | `INVENTORY_API_URL` | `http://localhost:8001` | Inventory API base URL |
-| `INVENTORY_SEED_DEMO_DATA` | `false` | Seed product 7 with 42 units for local demonstrations |
+| `INVENTORY_SEED_DEMO_DATA` | `false` | Explicitly bootstrap product 7 with 42 units when its durable demo state is absent |
+| `PERSISTENCE_BACKEND` | `memory` in development; `postgres` in production | Select the Inventory persistence adapter; production rejects the in-memory backend |
+| `DATABASE_URL` | Required for PostgreSQL | PostgreSQL connection URL |
+| `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5` | PostgreSQL connection/pool acquisition timeout |
+| `DATABASE_POOL_MIN_SIZE` | `1` | Minimum async pool size |
+| `DATABASE_POOL_MAX_SIZE` | `10` | Maximum async pool size |
+| `POSTGRES_TEST_URL` | Unset | Optional disposable PostgreSQL URL for migration and repository integration tests |
 | `PAYMENT_DECLINE_ABOVE` | `1000` | Demo payment decline threshold |
 
 The sampler is parent-based: a service honors the sampling decision of an
@@ -557,28 +581,36 @@ uv run ruff check .
 
 The tests cover correlation ID preservation, W3C trace-context propagation,
 concurrent Saga context isolation, product/catalog and inventory invariants,
-idempotent receipts and reservations, oversell prevention, order processing
-and compensation, deterministic generator plans and publication, supplier
-onboarding/replenishment/lead-time behavior, and raw event schema validation,
-append durability, replay deduplication, and quarantine. CI also builds the
-dbt project against its versioned fixture dataset.
+idempotent receipts and reservations, order processing and compensation,
+deterministic generator plans and publication, supplier onboarding/replenishment,
+and raw event schema validation. PostgreSQL integration tests run when
+`POSTGRES_TEST_URL` is set; they create isolated schemas, apply migrations to an
+empty schema, verify repeat execution and checksum-drift rejection, exercise
+the Inventory repository, verify restart durability, and check append-only
+movement behavior and balance/journal reconciliation. CI provisions a
+PostgreSQL service for these tests. CI also builds the dbt project against its
+versioned fixture dataset.
 
 ## Scope and limitations
 
-The catalog, inventory balances, reservations, receipts, movement ledger,
-supplier policies, and supplier purchase-order state are process-local and are
-lost on service restart. The async lock protects one
-Inventory API process only; running multiple replicas would create divergent
-balances and could oversell. PostgreSQL transactions/row locks and durable
-idempotency are the next storage step before horizontal scaling. The current
-movement ledger is an in-memory domain record, not a durable event log.
+When `PERSISTENCE_BACKEND=postgres` is selected, the Inventory API stores its
+catalog, balances, reservations, idempotency results, and append-only movement
+journal in PostgreSQL. The balance is an operational projection and can be
+reconciled against the movement journal; the journal is a domain audit record,
+not full event sourcing. The in-memory `InventoryStore` remains available for
+unit tests and explicit development use. PostgreSQL row locks currently protect
+the multi-statement inventory writes, but the dedicated multi-process
+contention/no-oversell guarantees and tests remain in issue #22. Order outcomes,
+supplier policies, and purchase-order lifecycle persistence are still pending
+within their respective milestones; do not infer those domains are durable
+from the Inventory adapter.
 
 This MVP sends traces directly to Jaeger and writes logs to container stdout;
 selected structured logs are also stored in append-only raw JSONL files by the
 Event Collector. It does not include an OpenTelemetry Collector, a full log
-search backend, durable business storage, a production payment provider, a
-transactional producer outbox, authentication, or production deployment
-hardening. The event collector is single-writer and its producer queue is
+search backend for analytics events, durable order/payment state, a production
+payment provider, a transactional producer outbox, authentication, or
+production deployment hardening. The event collector is single-writer and its producer queue is
 best-effort before acknowledgement. Sagaz is used for workflow orchestration
 and compensation; its in-memory configuration here is not a substitute for
 durable state and reconciliation infrastructure.
