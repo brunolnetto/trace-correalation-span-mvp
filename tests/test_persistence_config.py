@@ -64,7 +64,19 @@ def test_postgres_backend_accepts_postgresql_url(
 
 
 def test_pool_sizes_must_be_positive(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("DATABASE_POOL_MAX_SIZE", "0")
 
     with pytest.raises(PersistenceConfigurationError, match="greater than zero"):
+        DatabaseSettings.from_env()
+
+
+def test_pool_minimum_cannot_exceed_maximum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("DATABASE_POOL_MIN_SIZE", "4")
+    monkeypatch.setenv("DATABASE_POOL_MAX_SIZE", "2")
+
+    with pytest.raises(PersistenceConfigurationError, match="cannot exceed"):
         DatabaseSettings.from_env()
