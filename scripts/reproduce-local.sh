@@ -69,8 +69,10 @@ if ! git ls-files --error-unmatch uv.lock >/dev/null 2>&1; then
   echo "NOTE: uv.lock is generated locally but is not committed. Review and commit it for repeatable installs."
 fi
 
-echo "==> 2/7: Run unit and concurrency tests"
-uv run --python 3.12 pytest
+echo "==> 2/7: Start PostgreSQL and run unit/integration tests"
+docker compose up --detach --wait postgres
+POSTGRES_TEST_URL="${POSTGRES_TEST_URL:-postgresql://app:app@127.0.0.1:15432/app}" \
+  uv run --python 3.12 pytest
 
 echo "==> 3/7: Run Ruff"
 uv run --python 3.12 ruff check .
