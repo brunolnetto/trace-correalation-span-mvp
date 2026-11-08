@@ -594,14 +594,14 @@ async def test_inventory_operations_are_safe_across_two_api_processes(
                 CREATE FUNCTION delay_timeout_receipt_idempotency()
                 RETURNS trigger
                 LANGUAGE plpgsql
-                AS $
+                AS $timeout$
                 BEGIN
                     IF NEW.idempotency_key = 'multi-process-timeout-retry' THEN
                         PERFORM pg_sleep(0.4);
                     END IF;
                     RETURN NEW;
                 END;
-                $
+                $timeout$
                 """
             )
             await connection.execute(
