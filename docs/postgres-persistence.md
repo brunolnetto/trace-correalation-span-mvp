@@ -114,7 +114,10 @@ execution. The terminal Saga action updates that row to `processed`. Catalog
 lookup failures, inactive products, inventory rejections, payment declines,
 timeouts, service errors, and incomplete compensations are also persisted as
 terminal business outcomes before the existing HTTP response is returned.
-The existing POST response body and status codes are unchanged.
+The compensation listener retains the context presented to compensation
+callbacks so a failed order can keep its reservation/payment references for
+later investigation. The existing POST response body and status codes are
+unchanged.
 
 A missing product is represented with a nullable catalog foreign key and a
 separate non-null `requested_product_id`, preserving the attempted identifier
