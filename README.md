@@ -454,9 +454,11 @@ Collector/analytics history:
 docker compose down -v
 ```
 
-**Warning:** `down -v` deletes the Collector event history, simulation and
-analytics reports, DuckDB database, and all other named-volume data. It is not
-part of the normal standalone wrapper. For configuration, scenario invariants,
+**Warning:** `down -v` deletes the PostgreSQL business database (products,
+orders, balances, reservations, idempotency records, and movement journal),
+Collector event history, simulation and analytics reports, DuckDB database,
+and all other named-volume data. It is a destructive local reset, not part of
+the normal standalone wrapper. For configuration, scenario invariants,
 failure semantics, and report details, see
 [the standalone execution guide](docs/standalone-execution.md).
 
