@@ -89,6 +89,7 @@ isolated PostgreSQL schema and verifies:
 
 - competing reservations cannot oversell;
 - simultaneous receipt retries apply stock once and return one receipt ID;
+- a client timeout followed by a retry with the same receipt key does not duplicate stock;
 - adjustment retries apply one movement;
 - reusing a key/identity with a different payload is rejected;
 - duplicate reservation creation returns one reservation identity;
