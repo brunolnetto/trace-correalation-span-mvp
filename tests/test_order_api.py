@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from importlib import import_module
 
 import httpx
@@ -127,7 +128,7 @@ async def test_process_order_returns_saga_result_and_correlation_id(monkeypatch)
     persisted = workflow._orders[123]
     assert persisted["status"] == "processed"
     assert persisted["requested_product_id"] == 7
-    assert persisted["unit_price"] == "99.90" or persisted["unit_price"] == __import__("decimal").Decimal("99.90")
+    assert persisted["unit_price"] == Decimal("99.90")
 
 
 @pytest.mark.asyncio
