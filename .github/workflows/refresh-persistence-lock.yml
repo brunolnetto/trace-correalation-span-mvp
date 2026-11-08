@@ -1,6 +1,7 @@
 name: Refresh persistence dependency lock
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - feat/21-postgres-persistence-foundation
@@ -28,6 +29,8 @@ jobs:
         run: uv python install 3.12
       - name: Regenerate lockfile
         run: uv lock --python 3.12
+      - name: Verify locked environment
+        run: uv sync --locked --all-groups
       - name: Commit lockfile
         run: |
           if git diff --quiet -- uv.lock; then
