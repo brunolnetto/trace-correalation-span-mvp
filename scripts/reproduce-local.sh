@@ -75,8 +75,10 @@ uv run --python 3.12 pytest
 echo "==> 3/7: Run Ruff"
 uv run --python 3.12 ruff check .
 
-echo "==> 4/7: Build and start Jaeger, APIs, supplier, and event collector"
+echo "==> 4/7: Migrate PostgreSQL and start Jaeger, APIs, supplier, and event collector"
 docker compose down --remove-orphans
+docker compose up --detach --wait postgres
+bash scripts/migrate.sh
 docker compose up --build --detach
 
 wait_for_url() {
