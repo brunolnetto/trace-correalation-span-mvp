@@ -1,0 +1,41 @@
+name: Refresh persistence dependency lock
+
+on:
+  push:
+    branches:
+      - feat/21-postgres-persistence-foundation
+    paths:
+      - pyproject.toml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: persistence-uv-lock
+  cancel-in-progress: false
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Regenerate lockfile
+        run: uv lock --python 3.12
+      - name: Commit lockfile
+        run: |
+          if git diff --quiet -- uv.lock; then
+            echo "uv.lock is already current."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add uv.lock
+          git commit -m "build: regenerate uv lock for psycopg"
+          git push
