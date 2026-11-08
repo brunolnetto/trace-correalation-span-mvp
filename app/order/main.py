@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from decimal import Decimal
 from uuid import uuid4
 
@@ -11,19 +13,43 @@ from opentelemetry import trace
 
 from app.observability import configure_observability, correlation_id_context
 from app.order import workflow
+from app.order.repository import PostgresOrderRepository
 from app.order.workflow import (
     PaymentDeclined,
     ProcessOrderRequest,
     create_order_processing_saga,
 )
+from app.persistence.config import DatabaseSettings
+from app.persistence.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("order-api")
+
+database_manager = DatabaseManager()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings = DatabaseSettings.from_env()
+    await database_manager.open(settings)
+    try:
+        if settings.backend == "postgres":
+            workflow.configure_order_repository(
+                PostgresOrderRepository(database_manager)
+            )
+        else:
+            workflow.configure_order_repository(None)
+        yield
+    finally:
+        workflow.configure_order_repository(None)
+        await database_manager.close()
+
 
 app = FastAPI(
     title="Order API",
     description="Order service demonstrating correlation IDs and distributed traces.",
     version="0.1.0",
+    lifespan=lifespan,
 )
 configure_observability(app, os.getenv("SERVICE_NAME", "order-api"))
 
@@ -50,6 +76,11 @@ def classify_order_failure(exc: Exception) -> str:
 
 @app.get("/healthz", tags=["health"])
 async def healthcheck():
+    if not await database_manager.healthy():
+        raise HTTPException(
+            status_code=503,
+            detail="Database unavailable",
+        )
     return {"status": "ok", "service": "order-api"}
 
 
