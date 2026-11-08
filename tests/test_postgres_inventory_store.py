@@ -236,9 +236,9 @@ async def test_inventory_api_uses_postgres_repository_with_existing_http_contrac
                 PostgresInventoryStore,
             )
             async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=inventory_module.app),
-            base_url="http://inventory.test",
-        ) as client:
+                transport=httpx.ASGITransport(app=inventory_module.app),
+                base_url="http://inventory.test",
+            ) as client:
                 health = await client.get("/healthz")
                 assert health.status_code == 200
                 assert health.json() == {
@@ -247,14 +247,14 @@ async def test_inventory_api_uses_postgres_repository_with_existing_http_contrac
                 }
 
                 created = await client.post(
-                "/products",
-                json={
-                    "sku": "API-POSTGRES-001",
-                    "name": "API PostgreSQL product",
-                    "category": "integration",
-                    "unit_price": "21.50",
-                },
-            )
+                    "/products",
+                    json={
+                        "sku": "API-POSTGRES-001",
+                        "name": "API PostgreSQL product",
+                        "category": "integration",
+                        "unit_price": "21.50",
+                    },
+                )
                 assert created.status_code == 201
                 product = created.json()
                 assert {
@@ -270,13 +270,13 @@ async def test_inventory_api_uses_postgres_repository_with_existing_http_contrac
 
                 product_id = product["product_id"]
                 receipt = await client.post(
-                f"/inventory/{product_id}/receipts",
-                json={
-                    "quantity": 8,
-                    "idempotency_key": "api-postgres-receipt",
-                    "reference": "API-PO-001",
-                },
-            )
+                    f"/inventory/{product_id}/receipts",
+                    json={
+                        "quantity": 8,
+                        "idempotency_key": "api-postgres-receipt",
+                        "reference": "API-PO-001",
+                    },
+                )
                 assert receipt.status_code == 201
                 inventory = await client.get(f"/inventory/{product_id}")
                 assert inventory.status_code == 200
