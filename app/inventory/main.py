@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Query, status
 from opentelemetry import trace
