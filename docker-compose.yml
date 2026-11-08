@@ -67,6 +67,10 @@ services:
       SERVICE_NAME: inventory-api
       EVENT_COLLECTOR_URL: http://event-collector:8010
       INVENTORY_SEED_DEMO_DATA: "true"
+      PERSISTENCE_BACKEND: postgres
+      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-app}
+      DATABASE_POOL_MIN_SIZE: "1"
+      DATABASE_POOL_MAX_SIZE: "10"
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
       OTEL_TRACES_SAMPLER_ARG: "1.0"
       ENVIRONMENT: development
@@ -86,6 +90,8 @@ services:
       jaeger:
         condition: service_started
       event-collector:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
   order-api:
