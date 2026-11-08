@@ -51,7 +51,10 @@ def test_migrations_apply_to_empty_schema_repeat_and_reject_checksum_drift(
 ) -> None:
     with psycopg.connect(isolated_postgres_schema, row_factory=dict_row) as connection:
         applied = apply_migrations(connection, MIGRATIONS_DIR)
-        assert applied == ["0001_core_persistence"]
+        assert applied == [
+            "0001_core_persistence",
+            "0002_protect_movement_truncate",
+        ]
 
         tables = {
             row["table_name"]
@@ -77,7 +80,7 @@ def test_migrations_apply_to_empty_schema_repeat_and_reject_checksum_drift(
         migration_count = connection.execute(
             "SELECT count(*) AS count FROM schema_migrations"
         ).fetchone()["count"]
-        assert migration_count == 1
+        assert migration_count == 2
 
     altered_migrations = tmp_path / "migrations"
     shutil.copytree(MIGRATIONS_DIR, altered_migrations)
