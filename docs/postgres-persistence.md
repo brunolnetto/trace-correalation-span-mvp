@@ -1,7 +1,7 @@
 # PostgreSQL persistence foundation
 
 This document tracks issue #21. PostgreSQL is the durable source of truth for
-Inventory business state. The Event Collector and dbt remain observability and
+the core Order and Inventory business state. The Event Collector and dbt remain observability and
 analytics products, never write authorities.
 
 ## Decisions
@@ -57,11 +57,12 @@ by environment:
   `DATABASE_URL` is configured. An explicit in-memory production backend is
   rejected; there is no silent fallback.
 
-The Inventory FastAPI lifespan opens one `psycopg_pool.AsyncConnectionPool`
-per worker process and closes it on shutdown. Connections use dict rows. The
-`/healthz` endpoint performs a lightweight `SELECT 1` when PostgreSQL is
-selected and returns HTTP 503 if the database is unavailable. The database
-pool is created after the worker starts, not shared across forked processes.
+The Order and Inventory FastAPI lifespans each open one
+`psycopg_pool.AsyncConnectionPool` per worker process and close it on shutdown.
+Connections use dict rows. Both `/healthz` endpoints perform a lightweight
+`SELECT 1` when PostgreSQL is selected and return HTTP 503 if the database is
+unavailable. Pools are created after each worker starts, not shared across
+forked processes.
 
 ## Migration and local development
 
@@ -101,9 +102,31 @@ For PostgreSQL integration tests, set `POSTGRES_TEST_URL` to a disposable
 database URL. Each test creates a unique temporary schema, applies migrations
 to that empty schema, and drops it afterward. The test database user therefore
 needs permission to create and drop schemas. The tests cover first application,
-repeat execution, checksum drift, Inventory persistence, idempotency,
-append-only movement behavior, reconciliation, and a new pool after simulated
-process restart. CI provisions PostgreSQL and sets this variable.
+repeat execution, checksum drift, Inventory persistence, Order outcome
+create/update/read, catalog-failure capture, idempotency, append-only movement
+behavior, reconciliation, API contract preservation, and new pools after
+simulated process restart. CI provisions PostgreSQL and sets this variable.
+
+## Order outcome persistence
+
+The Order API writes a `pending` row after catalog preflight and before Saga
+execution. The terminal Saga action updates that row to `processed`. Catalog
+lookup failures, inactive products, inventory rejections, payment declines,
+timeouts, service errors, and incomplete compensations are also persisted as
+terminal business outcomes before the existing HTTP response is returned.
+The existing POST response body and status codes are unchanged.
+
+A missing product is represented with a nullable catalog foreign key and a
+separate non-null `requested_product_id`, preserving the attempted identifier
+without fabricating a product row. Repeated processing with the same
+`order_id` updates that order's latest outcome, matching the pre-existing
+in-memory dictionary behavior. The `GET /orders/{order_id}` route remains the
+existing inventory lookup; this issue does not change its HTTP contract.
+
+The order stores the payment reference returned by the demo gateway, but the
+gateway's charged/refunded state remains process-local. This repository does
+not claim durable external payment processing or a transactional payment
+ledger.
 
 ## Inventory transaction boundaries
 
@@ -125,12 +148,11 @@ complete.
 
 ## Remaining in #21
 
-- Add repository-backed order outcome persistence and wire it into the Order
-  workflow without changing its HTTP contract.
-- Complete the README and operational behavior for production configuration,
-  backups, and local reset.
-- Run the repository's complete test/lint/reproduction suite against PostgreSQL
-  and inspect the CI result.
+- Regenerate `uv.lock` with the new Psycopg runtime dependency and verify
+  `uv sync --locked --all-groups`.
+- Run the complete pytest, Ruff, PostgreSQL integration, and end-to-end
+  reproduction suites against the resolved dependency lock.
+- Review the final CI result and the PR diff.
 
 Supplier policies and purchase-order lifecycle remain in issue #23. Transactional
 outbox delivery remains separately tracked.
