@@ -412,7 +412,7 @@ class PostgresInventoryStore:
         )
         async with self.database.connection() as connection:
             cursor = await connection.execute(
-                "SELECT is_active FROM products WHERE product_id = %s",
+                "SELECT is_active FROM products WHERE product_id = %s FOR UPDATE",
                 (product_id,),
             )
             product = await cursor.fetchone()
