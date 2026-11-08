@@ -10,7 +10,7 @@ import httpx
 import psycopg
 import pytest
 from psycopg import sql
-from psycopg.conninfo import make_conninfo
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from app.inventory.postgres_store import PostgresInventoryStore
 from app.inventory.store import InventoryReservationRequest, ProductCreate
@@ -30,9 +30,11 @@ def postgres_order_schema_url() -> Iterator[str]:
     with psycopg.connect(database_url, autocommit=True) as admin:
         admin.execute(sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema)))
 
-    isolated_url = make_conninfo(
-        database_url,
-        options=f"-c search_path={schema}",
+    parsed_url = urlsplit(database_url)
+    query = parse_qsl(parsed_url.query, keep_blank_values=True)
+    query.append(("options", f"-c search_path={schema}"))
+    isolated_url = urlunsplit(
+        parsed_url._replace(query=urlencode(query))
     )
     try:
         with psycopg.connect(isolated_url) as connection:
