@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from decimal import Decimal
-from itertools import count
 from uuid import UUID, uuid4
 
 import httpx
