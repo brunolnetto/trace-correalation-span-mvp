@@ -7,8 +7,15 @@ ALTER TABLE orders
     ALTER COLUMN total_amount DROP NOT NULL;
 
 ALTER TABLE orders
-    ADD COLUMN requested_product_id BIGINT NOT NULL,
+    ADD COLUMN requested_product_id BIGINT,
     ADD COLUMN correlation_id VARCHAR(128);
+
+UPDATE orders
+SET requested_product_id = product_id
+WHERE requested_product_id IS NULL;
+
+ALTER TABLE orders
+    ALTER COLUMN requested_product_id SET NOT NULL;
 
 ALTER TABLE orders
     DROP CONSTRAINT orders_status_check;
