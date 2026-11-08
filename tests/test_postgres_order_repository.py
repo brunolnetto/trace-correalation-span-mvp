@@ -168,6 +168,7 @@ async def test_order_api_persists_success_and_catalog_failure_without_contract_c
             UUID("00000000-0000-4000-8000-000000000001"),
             UUID("00000000-0000-4000-8000-000000000002"),
             UUID("00000000-0000-4000-8000-000000000003"),
+            UUID("00000000-0000-4000-8000-000000000004"),
         ]
     )
     monkeypatch.setenv("ENVIRONMENT", "development")
@@ -179,6 +180,7 @@ async def test_order_api_persists_success_and_catalog_failure_without_contract_c
     await workflow.payment_gateway.reset()
 
     reservation_ids: dict[int, str] = {}
+    failed_release_reservations: set[str] = set()
 
     def inventory_handler(request: httpx.Request) -> httpx.Response:
         if request.method == "GET" and request.url.path == "/products/999":
@@ -204,6 +206,11 @@ async def test_order_api_persists_success_and_catalog_failure_without_contract_c
             )
         if request.method == "DELETE":
             reservation_id = request.url.path.rsplit("/", 1)[-1]
+            if reservation_id in failed_release_reservations:
+                return httpx.Response(
+                    503,
+                    json={"detail": "intentional compensation failure"},
+                )
             return httpx.Response(
                 200,
                 json={
@@ -244,6 +251,16 @@ async def test_order_api_persists_success_and_catalog_failure_without_contract_c
                 ),
             )
             reservation_ids[125] = failed_reservation["reservation_id"]
+            incomplete_reservation = await inventory.reserve(
+                7,
+                InventoryReservationRequest(
+                    order_id=126,
+                    saga_id="00000000-0000-4000-8000-000000000004",
+                    quantity=11,
+                ),
+            )
+            reservation_ids[126] = incomplete_reservation["reservation_id"]
+            failed_release_reservations.add(incomplete_reservation["reservation_id"])
 
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=order_module.app),
@@ -288,6 +305,15 @@ async def test_order_api_persists_success_and_catalog_failure_without_contract_c
                     )
                 }
 
+                incomplete = await client.post(
+                    "/orders/126/process",
+                    json={"product_id": 7, "quantity": 11},
+                )
+                assert incomplete.status_code == 500
+                assert incomplete.json()["detail"]["incomplete_compensations"] == [
+                    "reserve_inventory"
+                ]
+
             repository = PostgresOrderRepository(order_module.database_manager)
             failed = await repository.get(123)
             processed = await repository.get(124)
@@ -302,6 +328,15 @@ async def test_order_api_persists_success_and_catalog_failure_without_contract_c
             assert payment_declined["status"] == "payment_declined"
             assert payment_declined["reservation_id"] == reservation_ids[125]
             assert payment_declined["payment_id"] is None
+
+            compensation_incomplete = await repository.get(126)
+            assert compensation_incomplete is not None
+            assert compensation_incomplete["status"] == "compensation_incomplete"
+            assert compensation_incomplete["failure_category"] == "payment_declined"
+            assert (
+                compensation_incomplete["reservation_id"]
+                == reservation_ids[126]
+            )
             assert workflow._orders == {}
     finally:
         await workflow.payment_gateway.reset()
