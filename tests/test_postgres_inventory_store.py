@@ -165,6 +165,10 @@ async def test_inventory_catalog_and_transactional_movements_survive_pool_restar
             "SKU-POSTGRES-001"
         )
         assert (await restarted_store.inventory_snapshot(product_id)) == snapshot
+        assert await restarted_store.receive_stock(product_id, receipt_request) == receipt
+        assert await restarted_store.adjust_stock(product_id, adjustment_request) == movement
+        assert (await restarted_store.inventory_snapshot(product_id)) == snapshot
+        assert len(await restarted_store.list_movements(product_id, limit=100)) == 6
         assert await restarted_store.reconcile(product_id) == reconciliation
         assert await restarted_manager.healthy()
     finally:
