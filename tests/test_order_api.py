@@ -145,6 +145,7 @@ async def test_payment_decline_returns_402_after_inventory_compensation(monkeypa
     )
     assert [request.method for request in requests] == ["GET", "POST", "DELETE"]
     assert workflow._orders[123]["status"] == "payment_declined"
+    assert workflow._orders[123]["reservation_id"] == "reservation-api-test"
 
 
 @pytest.mark.asyncio
