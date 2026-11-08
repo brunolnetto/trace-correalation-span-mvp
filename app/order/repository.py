@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 from app.persistence.database import DatabaseManager
 
@@ -36,6 +37,9 @@ class PostgresOrderRepository:
     async def save_outcome(self, record: dict[str, Any]) -> dict[str, Any]:
         unit_price = record.get("unit_price")
         total_amount = record.get("total_amount")
+        reservation_id = record.get("reservation_id")
+        if reservation_id is not None and not isinstance(reservation_id, UUID):
+            reservation_id = UUID(str(reservation_id))
         if unit_price is not None and not isinstance(unit_price, Decimal):
             unit_price = Decimal(str(unit_price))
         if total_amount is not None and not isinstance(total_amount, Decimal):
@@ -91,6 +95,7 @@ class PostgresOrderRepository:
                     **record,
                     "unit_price": unit_price,
                     "total_amount": total_amount,
+                    "reservation_id": reservation_id,
                 },
             )
             row = await cursor.fetchone()
