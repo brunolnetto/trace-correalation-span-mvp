@@ -187,16 +187,24 @@ async def test_postgres_movement_journal_rejects_updates_and_deletes(
         ),
     )
 
-    with pytest.raises(psycopg.Error, match="append-only"):
-        async with manager.connection() as connection:
-            await connection.execute(
-                """
-                UPDATE inventory_movements
-                SET reference = 'rewritten'
-                WHERE movement_id = %s
-                """,
-                (movement["receipt_id"],),
-            )
+    statements = (
+        (
+            """
+            UPDATE inventory_movements
+            SET reference = 'rewritten'
+            WHERE movement_id = %s
+            """,
+            (movement["receipt_id"],),
+        ),
+        (
+            "DELETE FROM inventory_movements WHERE movement_id = %s",
+            (movement["receipt_id"],),
+        ),
+    )
+    for statement, parameters in statements:
+        with pytest.raises(psycopg.Error, match="append-only"):
+            async with manager.connection() as connection:
+                await connection.execute(statement, parameters)
 
     movements = await store.list_movements(product_id)
     assert len(movements) == 1
@@ -213,6 +221,7 @@ async def test_inventory_api_uses_postgres_repository_with_existing_http_contrac
     import httpx
 
     inventory_module = import_module("app.inventory.main")
+    original_store = inventory_module.inventory_store
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("PERSISTENCE_BACKEND", "postgres")
     monkeypatch.setenv("DATABASE_URL", postgres_schema_url)
@@ -220,23 +229,24 @@ async def test_inventory_api_uses_postgres_repository_with_existing_http_contrac
     monkeypatch.setenv("DATABASE_POOL_MAX_SIZE", "3")
     monkeypatch.setattr(inventory_module, "seed_demo_data", False)
 
-    async with inventory_module.lifespan(inventory_module.app):
-        assert isinstance(
-            inventory_module.inventory_store,
-            PostgresInventoryStore,
-        )
-        async with httpx.AsyncClient(
+    try:
+        async with inventory_module.lifespan(inventory_module.app):
+            assert isinstance(
+                inventory_module.inventory_store,
+                PostgresInventoryStore,
+            )
+            async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=inventory_module.app),
             base_url="http://inventory.test",
         ) as client:
-            health = await client.get("/healthz")
-            assert health.status_code == 200
-            assert health.json() == {
-                "status": "ok",
-                "service": "inventory-api",
-            }
+                health = await client.get("/healthz")
+                assert health.status_code == 200
+                assert health.json() == {
+                    "status": "ok",
+                    "service": "inventory-api",
+                }
 
-            created = await client.post(
+                created = await client.post(
                 "/products",
                 json={
                     "sku": "API-POSTGRES-001",
@@ -245,21 +255,21 @@ async def test_inventory_api_uses_postgres_repository_with_existing_http_contrac
                     "unit_price": "21.50",
                 },
             )
-            assert created.status_code == 201
-            product = created.json()
-            assert {
-                "product_id",
-                "sku",
-                "name",
-                "category",
-                "unit_price",
-                "is_active",
-                "created_at",
-                "updated_at",
-            }.issubset(product)
+                assert created.status_code == 201
+                product = created.json()
+                assert {
+                    "product_id",
+                    "sku",
+                    "name",
+                    "category",
+                    "unit_price",
+                    "is_active",
+                    "created_at",
+                    "updated_at",
+                }.issubset(product)
 
-            product_id = product["product_id"]
-            receipt = await client.post(
+                product_id = product["product_id"]
+                receipt = await client.post(
                 f"/inventory/{product_id}/receipts",
                 json={
                     "quantity": 8,
@@ -267,11 +277,10 @@ async def test_inventory_api_uses_postgres_repository_with_existing_http_contrac
                     "reference": "API-PO-001",
                 },
             )
-            assert receipt.status_code == 201
-            inventory = await client.get(f"/inventory/{product_id}")
-            assert inventory.status_code == 200
-            assert inventory.json()["on_hand"] == 8
-            assert inventory.json()["available_quantity"] == 8
-
-    # Shutdown closes the shared pool; the in-memory adapter remains the default
-    # when an isolated test imports the module without enabling PostgreSQL.
+                assert receipt.status_code == 201
+                inventory = await client.get(f"/inventory/{product_id}")
+                assert inventory.status_code == 200
+                assert inventory.json()["on_hand"] == 8
+                assert inventory.json()["available_quantity"] == 8
+    finally:
+        inventory_module.inventory_store = original_store
