@@ -111,6 +111,7 @@ async def test_payment_decline_compensates_inventory_reservation(monkeypatch):
         "/inventory/reservations/reservation-123"
     )
     assert tracker.incomplete_steps == []
+    assert tracker.last_context["reservation_id"] == "reservation-123"
     assert workflow._orders == {}
 
 
