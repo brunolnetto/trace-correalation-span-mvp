@@ -7,7 +7,7 @@ from uuid import uuid4
 import psycopg
 import pytest
 from psycopg import sql
-from psycopg.conninfo import make_conninfo
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from psycopg.rows import dict_row
 
 from app.inventory.postgres_store import PostgresInventoryStore
@@ -35,9 +35,11 @@ def postgres_schema_url():
             sql.SQL("CREATE SCHEMA {}").format(sql.Identifier(schema))
         )
 
-    isolated_url = make_conninfo(
-        database_url,
-        options=f"-c search_path={schema}",
+    parsed_url = urlsplit(database_url)
+    query = parse_qsl(parsed_url.query, keep_blank_values=True)
+    query.append(("options", f"-c search_path={schema}"))
+    isolated_url = urlunsplit(
+        parsed_url._replace(query=urlencode(query))
     )
     try:
         with psycopg.connect(isolated_url, row_factory=dict_row) as connection:
