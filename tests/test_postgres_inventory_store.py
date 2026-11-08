@@ -347,8 +347,10 @@ def _start_inventory_api_process(database_url: str) -> tuple[subprocess.Popen, s
             "INVENTORY_SEED_DEMO_DATA": "false",
             "SERVICE_NAME": "inventory-api-concurrency-test",
             "LOG_LEVEL": "WARNING",
+            "OTEL_TRACES_SAMPLER_ARG": "0.0",
         }
     )
+    environment.pop("EVENT_COLLECTOR_URL", None)
     environment.pop("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT", None)
     environment.pop("OTEL_EXPORTER_OTLP_ENDPOINT", None)
 
