@@ -285,3 +285,36 @@ async def test_inventory_api_uses_postgres_repository_with_existing_http_contrac
                 assert inventory.json()["available_quantity"] == 8
     finally:
         inventory_module.inventory_store = original_store
+
+
+@pytest.mark.asyncio
+async def test_demo_bootstrap_is_explicit_idempotent_and_reconciled(
+    postgres_store,
+) -> None:
+    store, _manager, _settings = postgres_store
+
+    assert await store.list_products() == []
+    await store.seed_demo_data()
+
+    product = await store.get_product(7)
+    assert product["sku"] == "DEMO-007"
+    assert product["unit_price"] == Decimal("99.90")
+
+    snapshot = await store.inventory_snapshot(7)
+    assert (snapshot["on_hand"], snapshot["reserved"]) == (42, 0)
+
+    first_movements = await store.list_movements(7)
+    assert len(first_movements) == 1
+    assert first_movements[0]["movement_type"] == "opening_balance"
+    assert first_movements[0]["quantity_delta_on_hand"] == 42
+
+    await store.seed_demo_data()
+    assert await store.inventory_snapshot(7) == snapshot
+    assert await store.list_movements(7) == first_movements
+
+    assert await store.reconcile(7) == {
+        "on_hand": 42,
+        "reserved": 0,
+        "journal_on_hand": 42,
+        "journal_reserved": 0,
+    }
