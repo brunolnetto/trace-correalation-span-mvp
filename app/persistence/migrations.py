@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections.abc import Mapping
 import os
 import re
+from collections.abc import Mapping
 from pathlib import Path
 
 import psycopg
