@@ -66,8 +66,11 @@ class DatabaseManager:
 
     async def close(self) -> None:
         pool, self._pool = self._pool, None
-        if pool is not None:
-            await pool.close()
+        try:
+            if pool is not None:
+                await pool.close()
+        finally:
+            self._settings = None
 
     def connection(
         self, *, timeout: float | None = None
