@@ -33,15 +33,15 @@ The idempotency key is unique within an operation scope. The canonical request h
 
 ## Migration and bootstrap lifecycle
 
-1. Configure DATABASE_URL explicitly for each API.
-2. Run the migration command as a separate deployment/development step; API startup does not mutate schema.
-3. For local tests, start a disposable PostgreSQL service and apply migrations.
+1. Start local PostgreSQL with `docker compose up --detach postgres`. The development defaults expose it on `127.0.0.1:15432` with database/user/password `app`; override `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` outside disposable local development.
+2. Run `bash scripts/migrate.sh`. The runner takes a transaction-scoped advisory lock, applies the versioned SQL migration, and records its SHA-256 checksum in `schema_migrations`. Re-running an unchanged migration is a no-op; changing an already-applied migration fails rather than silently mutating an existing database.
+3. Configure `DATABASE_URL` explicitly for each API before enabling repository-backed persistence. API startup does not mutate schema. For local integration tests, use a disposable PostgreSQL service and apply migrations.
 4. Run the explicit demo bootstrap only when INVENTORY_SEED_DEMO_DATA=true (or an explicit bootstrap command is invoked). It must be safe to re-run and must not overwrite an existing product or balance.
 5. Production configuration must fail fast when PostgreSQL is missing or unreachable. There is no implicit in-memory fallback.
 
 ## Implementation sequence
 
-1. Schema and migration ledger, database configuration/lifecycle, and repository contracts.
+1. [In progress] Schema, PostgreSQL Compose service, checksum-verified migration runner, database configuration/lifecycle, and repository contracts.
 2. Inventory repository implementation and API wiring while preserving the existing in-memory test double.
 3. Order repository implementation and persistence of order outcomes.
 4. Explicit demo bootstrap and README operations guide.
