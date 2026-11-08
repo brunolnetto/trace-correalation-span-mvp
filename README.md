@@ -397,6 +397,66 @@ DuckDB database in a separate `analytics-data` volume. If the collector volume
 is empty, dbt uses the included fixture dataset. For model details and local
 commands see [analytics/README.md](analytics/README.md).
 
+## Standalone simulation and analytics
+
+Run the deterministic order-to-replenishment scenario followed by the existing
+dbt build as one finite Compose workload:
+
+```bash
+bash scripts/run-standalone.sh
+```
+
+The wrapper starts the Order API, Inventory API, Supplier Simulator, Event
+Collector, and Jaeger. It waits for the Simulation Runner to exit and checks
+its actual container exit code. Only after successful simulation completion
+does it wait for the Analytics Runner and return that job's exit code. It
+does not use `--abort-on-container-exit`: that option would stop the long-running
+dependencies when the Simulation Runner exits, before analytics can finish.
+
+By default, the wrapper builds the images and removes the containers/network
+after both jobs finish. Named volumes are preserved, so reports, raw events,
+DuckDB data, and dbt artifacts remain available. Set
+`STANDALONE_BUILD=0` to skip rebuilding images, or
+`STANDALONE_KEEP_STACK=1` to leave the Compose stack for inspection.
+
+The run writes `simulation-report.json` to the `run-state` volume and
+`run-report.json`, the DuckDB database, and dbt artifacts to
+`analytics-data`. Inspect the reports with:
+
+```bash
+docker compose --profile standalone run --rm --no-deps \
+  --entrypoint cat simulation-runner \
+  /run-state/simulation-report.json
+
+docker compose --profile standalone run --rm --no-deps \
+  --entrypoint cat analytics-runner \
+  /analytics-data/run-report.json
+```
+
+Exercise the orchestration failure paths with:
+
+```bash
+bash scripts/test-standalone-failure-paths.sh
+```
+
+The failure-path script verifies that a failed Simulation Runner prevents
+Analytics Runner startup and that a failing `dbt` executable produces a
+machine-readable failure report and a non-zero overall result. It uses
+temporary Compose overrides and preserves named volumes.
+
+To intentionally reset all persisted local data and start from an empty
+Collector/analytics history:
+
+```bash
+docker compose down -v
+```
+
+**Warning:** `down -v` deletes the Collector event history, simulation and
+analytics reports, DuckDB database, and all other named-volume data. It is not
+part of the normal standalone wrapper. For configuration, scenario invariants,
+failure semantics, and report details, see
+[the standalone execution guide](docs/standalone-execution.md).
+
 ## Reproduce locally (recommended)
 
 Requirements: Docker Engine, Docker Compose v2, `uv`, and `curl`. The script

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from uuid import UUID
 
@@ -164,3 +165,29 @@ def test_recovery_separates_incomplete_final_record_before_next_append(
         "order.process.completed"
     )
     assert len(store.list_quarantine()) == 1
+
+
+def test_collector_handler_does_not_forward_its_own_httpx_transport_logs():
+    from app.event_publisher import AsyncCollectorHandler
+
+    handler = AsyncCollectorHandler(
+        service_name="test-service",
+        collector_url="http://collector.test",
+        formatter=logging.Formatter("%(message)s"),
+    )
+    try:
+        record = logging.LogRecord(
+            name="httpx",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg='HTTP Request: POST http://collector.test/v1/events "HTTP/1.1 202 Accepted"',
+            args=(),
+            exc_info=None,
+        )
+
+        handler.emit(record)
+
+        assert handler._queue.empty()
+    finally:
+        handler.close()
