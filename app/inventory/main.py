@@ -20,6 +20,7 @@ from app.inventory.store import (
 from app.observability import configure_observability
 from app.persistence.config import DatabaseSettings
 from app.persistence.database import DatabaseManager
+from app.persistence.ports import InventoryStorePort
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("inventory-api")
@@ -28,7 +29,9 @@ seed_demo_data = os.getenv("INVENTORY_SEED_DEMO_DATA", "false").lower() in {
     "true",
     "yes",
 }
-inventory_store = InventoryStore(seed_demo_data=seed_demo_data)
+inventory_store: InventoryStorePort = InventoryStore(
+    seed_demo_data=seed_demo_data
+)
 database_manager = DatabaseManager()
 
 
