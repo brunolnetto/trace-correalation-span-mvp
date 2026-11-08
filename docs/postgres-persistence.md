@@ -41,10 +41,18 @@ The idempotency key is unique within an operation scope. The canonical request h
 
 ## Implementation sequence
 
-1. [In progress] Schema, PostgreSQL Compose service, checksum-verified migration runner, database configuration/lifecycle, and repository contracts.
+1. [In progress] Schema, PostgreSQL Compose service, checksum-verified migration runner, validated database settings, and repository Protocol contracts. Connection-pool lifecycle and migration-runner tests remain to be added.
 2. Inventory repository implementation and API wiring while preserving the existing in-memory test double.
 3. Order repository implementation and persistence of order outcomes.
 4. Explicit demo bootstrap and README operations guide.
 5. PostgreSQL integration tests for create/read/update/restart, movement immutability, idempotency replay/conflict, and balance/journal reconciliation.
+
+## Current implementation status
+
+- `DatabaseSettings.from_env()` validates the selected backend, PostgreSQL URL, timeout, and pool bounds. Production defaults to PostgreSQL and rejects an in-memory backend; development/test can retain the current in-memory test doubles.
+- Repository Protocols define the product, inventory, reservation, idempotency, and order boundaries. They are contracts only; no PostgreSQL adapter is wired into either API yet.
+- The PostgreSQL Compose service, initial schema, and checksum-verified migration script are present. The migration script expects the PostgreSQL service to be running and applies the migration under a transaction-scoped advisory lock.
+- No connection pool is opened by application startup yet. That is intentional until the psycopg dependency and lockfile can be updated together and lifecycle tests can run.
+- Configuration unit tests cover production fail-fast behavior, URL validation, and pool-size validation. They have been committed but not executed in this environment.
 
 #22 remains a separate milestone: tests that coordinate at least two Inventory API processes and prove no overselling under contention. #23 remains separate: supplier policy and purchase-order persistence.
