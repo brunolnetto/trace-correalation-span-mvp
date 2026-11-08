@@ -614,9 +614,10 @@ lookup fails. The balance is an operational projection and can be
 reconciled against the movement journal; the journal is a domain audit record,
 not full event sourcing. The in-memory `InventoryStore` remains available for
 unit tests and explicit development use. PostgreSQL row locks and balance constraints protect the multi-statement
-inventory writes; the dedicated multi-process contention, retry, and rollback
-acceptance suite is tracked in issue #22 and documented in
-[the inventory concurrency contract](docs/inventory-concurrency.md). Supplier
+inventory writes. The PostgreSQL integration suite now covers multi-process
+contention, idempotent retries, transaction rollback, and balance constraints;
+see [the inventory concurrency contract](docs/inventory-concurrency.md).
+Supplier
 policies and purchase-order lifecycle persistence remain in issue #23. The
 demo payment gateway remains a process-local simulation: persisting a payment
 reference on the order does not make payment state or external payment effects
