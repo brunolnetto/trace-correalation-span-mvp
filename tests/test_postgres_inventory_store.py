@@ -200,6 +200,7 @@ async def test_postgres_movement_journal_rejects_updates_and_deletes(
             "DELETE FROM inventory_movements WHERE movement_id = %s",
             (movement["receipt_id"],),
         ),
+        ("TRUNCATE inventory_movements", ()),
     )
     for statement, parameters in statements:
         with pytest.raises(psycopg.Error, match="append-only"):
