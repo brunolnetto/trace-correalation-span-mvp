@@ -298,6 +298,7 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
         result = await saga.run(saga_context, saga_id=saga_id)
     except Exception as exc:
         incomplete_compensations = compensation_tracker.incomplete_steps
+        compensation_context = compensation_tracker.last_context
         failure_category = classify_order_failure(exc)
         outcome_status = (
             "compensation_incomplete"
@@ -313,8 +314,12 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
                 "unit_price": unit_price,
                 "total_amount": amount,
                 "saga_id": saga_id,
-                "reservation_id": saga_context.get("reservation_id"),
-                "payment_id": saga_context.get("payment_id"),
+                "reservation_id": compensation_context.get(
+                    "reservation_id", saga_context.get("reservation_id")
+                ),
+                "payment_id": compensation_context.get(
+                    "payment_id", saga_context.get("payment_id")
+                ),
                 "status": outcome_status,
                 "failure_category": failure_category,
                 "correlation_id": correlation_id,
