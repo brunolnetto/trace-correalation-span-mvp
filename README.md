@@ -504,10 +504,13 @@ docker compose up --build
 The APIs are exposed on host ports `18000` (Order), `18001` (Inventory),
 `18002` (Supplier Simulation), and `18003` (Event Collector). Jaeger UI is
 available on port `16686`. The separate migration command runs before the APIs; API startup never applies
-schema changes. Compose configures the Inventory API to use PostgreSQL and
-explicitly enables `INVENTORY_SEED_DEMO_DATA`, which creates product 7 with
-42 units only when the database has no corresponding demo movements. The
-Inventory API does not assume stock for unknown product IDs.
+schema changes. Both Order and Inventory APIs use the same PostgreSQL database
+with independent per-process connection pools. Order processing stores the
+pending and terminal business outcome, including rejected catalog lookups.
+Compose configures the Inventory API to use PostgreSQL and explicitly enables
+`INVENTORY_SEED_DEMO_DATA`, which creates product 7 with 42 units only when
+the database has no corresponding demo movements. The Inventory API does not
+assume stock for unknown product IDs.
 
 ## Run without Docker
 
@@ -543,6 +546,8 @@ In non-production development/test runs, the default backend remains the
 in-memory test double unless `PERSISTENCE_BACKEND=postgres` is selected.
 
 ```bash
+PERSISTENCE_BACKEND=postgres \
+DATABASE_URL=postgresql://app:app@localhost:15432/app \
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://localhost:4318/v1/traces \
 INVENTORY_API_URL=http://localhost:8001 \
 SERVICE_NAME=order-api \
@@ -565,7 +570,7 @@ uv run uvicorn app.order.main:app --port 8000
 | `DATABASE_URL` | Required for PostgreSQL | PostgreSQL connection URL |
 | `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5` | PostgreSQL connection/pool acquisition timeout |
 | `DATABASE_POOL_MIN_SIZE` | `1` | Minimum async pool size |
-| `DATABASE_POOL_MAX_SIZE` | `10` | Maximum async pool size |
+| `DATABASE_POOL_MAX_SIZE` | `10` | Maximum async pool size per API worker |
 | `POSTGRES_TEST_URL` | Unset | Optional disposable PostgreSQL URL for migration and repository integration tests |
 | `PAYMENT_DECLINE_ABOVE` | `1000` | Demo payment decline threshold |
 
@@ -593,22 +598,26 @@ versioned fixture dataset.
 
 ## Scope and limitations
 
-When `PERSISTENCE_BACKEND=postgres` is selected, the Inventory API stores its
-catalog, balances, reservations, idempotency results, and append-only movement
-journal in PostgreSQL. The balance is an operational projection and can be
+When `PERSISTENCE_BACKEND=postgres` is selected, both APIs use PostgreSQL.
+The Inventory API stores its catalog, balances, reservations, idempotency
+results, and append-only movement journal. The Order API stores each order's
+pending state and terminal business outcome (processed, rejected, declined,
+or compensation-incomplete), including the requested product ID when catalog
+lookup fails. The balance is an operational projection and can be
 reconciled against the movement journal; the journal is a domain audit record,
 not full event sourcing. The in-memory `InventoryStore` remains available for
 unit tests and explicit development use. PostgreSQL row locks currently protect
 the multi-statement inventory writes, but the dedicated multi-process
-contention/no-oversell guarantees and tests remain in issue #22. Order outcomes,
-supplier policies, and purchase-order lifecycle persistence are still pending
-within their respective milestones; do not infer those domains are durable
-from the Inventory adapter.
+contention/no-oversell guarantees and tests remain in issue #22. Supplier
+policies and purchase-order lifecycle persistence remain in issue #23. The
+demo payment gateway remains a process-local simulation: persisting a payment
+reference on the order does not make payment state or external payment effects
+durable.
 
 This MVP sends traces directly to Jaeger and writes logs to container stdout;
 selected structured logs are also stored in append-only raw JSONL files by the
 Event Collector. It does not include an OpenTelemetry Collector, a full log
-search backend for analytics events, durable order/payment state, a production
+search backend for analytics events, a durable payment ledger, a production
 payment provider, a transactional producer outbox, authentication, or
 production deployment hardening. The event collector is single-writer and its producer queue is
 best-effort before acknowledgement. Sagaz is used for workflow orchestration
