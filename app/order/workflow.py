@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from decimal import Decimal
 from threading import Lock
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
@@ -94,13 +95,17 @@ async def record_order_outcome(record: dict[str, Any]) -> dict[str, Any]:
 
 async def persist_order(ctx: dict[str, Any]) -> dict[str, str]:
     """Persist the successful terminal result of the Order Saga."""
+    unit_price = ctx.get("unit_price")
+    if unit_price is None:
+        unit_price = Decimal(str(ctx["amount"])) / int(ctx["quantity"])
+
     await record_order_outcome(
         {
             "order_id": int(ctx["order_id"]),
             "requested_product_id": int(ctx["product_id"]),
             "product_id": int(ctx["product_id"]),
             "quantity": int(ctx["quantity"]),
-            "unit_price": ctx["unit_price"],
+            "unit_price": unit_price,
             "total_amount": ctx["amount"],
             "saga_id": ctx["saga_id"],
             "reservation_id": ctx.get("reservation_id"),
