@@ -51,14 +51,11 @@ class IdempotencyRepository(Protocol):
 
 
 class OrderRepository(Protocol):
-    async def create(self, order: dict[str, Any]) -> dict[str, Any]: ...
+    async def save_outcome(
+        self, record: dict[str, Any]
+    ) -> dict[str, Any]: ...
 
     async def get(self, order_id: int) -> dict[str, Any] | None: ...
-
-    async def update_outcome(
-        self, order_id: int, outcome: dict[str, Any]
-    ) -> dict[str, Any] | None: ...
-
 
 class InventoryStorePort(Protocol):
     """Application-facing Inventory contract shared by memory and PostgreSQL."""
