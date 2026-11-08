@@ -25,7 +25,7 @@ from app.persistence.database import DatabaseManager
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("order-api")
 
-database_manager = DatabaseManager()
+database_manager = DatabaseManager(pool_name="order-api")
 
 
 @asynccontextmanager
