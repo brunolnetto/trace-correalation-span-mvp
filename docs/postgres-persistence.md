@@ -113,7 +113,7 @@ process restart. CI provisions PostgreSQL and sets this variable.
   in one transaction.
 - Reservation creation, release, and commit update the reservation, projection,
   and movement journal in one transaction.
-- The movement journal has a database trigger that rejects UPDATE and DELETE.
+- The movement journal has database triggers that reject UPDATE, DELETE, and TRUNCATE.
 - Product, inventory, reservation, and movement response shapes remain
   compatible with the existing Inventory HTTP API.
 
