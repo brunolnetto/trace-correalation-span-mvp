@@ -3,12 +3,12 @@ from __future__ import annotations
 import os
 import shutil
 from pathlib import Path
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
 import psycopg
 import pytest
 from psycopg import sql
-from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from app.persistence.migrations import (
     MIGRATIONS_DIR,
