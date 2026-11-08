@@ -73,20 +73,43 @@ class PaymentGateway:
 payment_gateway = PaymentGateway()
 _orders: dict[int, dict[str, Any]] = {}
 _order_lock = Lock()
+_order_repository: Any | None = None
+
+
+def configure_order_repository(repository: Any | None) -> None:
+    """Select the durable repository, or the in-memory test double."""
+    global _order_repository
+    _order_repository = repository
+
+
+async def record_order_outcome(record: dict[str, Any]) -> dict[str, Any]:
+    """Store the latest accepted/rejected business outcome for an order ID."""
+    if _order_repository is not None:
+        return await _order_repository.save_outcome(record)
+
+    with _order_lock:
+        _orders[int(record["order_id"])] = dict(record)
+        return dict(_orders[int(record["order_id"])])
 
 
 async def persist_order(ctx: dict[str, Any]) -> dict[str, str]:
-    """Persist a completed order in the MVP's process-local order store."""
-    record = {
-        "order_id": ctx["order_id"],
-        "product_id": ctx["product_id"],
-        "quantity": ctx["quantity"],
-        "amount": ctx["amount"],
-        "saga_id": ctx["saga_id"],
-        "status": "processed",
-    }
-    with _order_lock:
-        _orders[int(ctx["order_id"])] = record
+    """Persist the successful terminal result of the Order Saga."""
+    await record_order_outcome(
+        {
+            "order_id": int(ctx["order_id"]),
+            "requested_product_id": int(ctx["product_id"]),
+            "product_id": int(ctx["product_id"]),
+            "quantity": int(ctx["quantity"]),
+            "unit_price": ctx["unit_price"],
+            "total_amount": ctx["amount"],
+            "saga_id": ctx["saga_id"],
+            "reservation_id": ctx.get("reservation_id"),
+            "payment_id": ctx.get("payment_id"),
+            "status": "processed",
+            "failure_category": None,
+            "correlation_id": ctx.get("correlation_id"),
+        }
+    )
     return {"order_status": "processed"}
 
 
