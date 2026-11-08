@@ -4,13 +4,13 @@ import json
 import os
 from collections.abc import Iterator
 from decimal import Decimal
+from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import UUID, uuid4
 
 import httpx
 import psycopg
 import pytest
 from psycopg import sql
-from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from app.inventory.postgres_store import PostgresInventoryStore
 from app.inventory.store import InventoryReservationRequest, ProductCreate
