@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Iterator
 from decimal import Decimal
@@ -166,6 +167,7 @@ async def test_order_api_persists_success_and_catalog_failure_without_contract_c
         [
             UUID("00000000-0000-4000-8000-000000000001"),
             UUID("00000000-0000-4000-8000-000000000002"),
+            UUID("00000000-0000-4000-8000-000000000003"),
         ]
     )
     monkeypatch.setenv("ENVIRONMENT", "development")
@@ -176,10 +178,9 @@ async def test_order_api_persists_success_and_catalog_failure_without_contract_c
     monkeypatch.setattr(order_module, "uuid4", lambda: next(fixed_saga_ids))
     await workflow.payment_gateway.reset()
 
-    reservation_id: str | None = None
+    reservation_ids: dict[int, str] = {}
 
     def inventory_handler(request: httpx.Request) -> httpx.Response:
-        nonlocal reservation_id
         if request.method == "GET" and request.url.path == "/products/999":
             return httpx.Response(404, json={"detail": "not found"})
         if request.method == "GET" and request.url.path == "/products/7":
@@ -193,14 +194,16 @@ async def test_order_api_persists_success_and_catalog_failure_without_contract_c
                 },
             )
         if request.method == "POST":
+            order_id = json.loads(request.content)["order_id"]
             return httpx.Response(
                 200,
                 json={
-                    "reservation_id": reservation_id,
+                    "reservation_id": reservation_ids[order_id],
                     "status": "reserved",
                 },
             )
         if request.method == "DELETE":
+            reservation_id = request.url.path.rsplit("/", 1)[-1]
             return httpx.Response(
                 200,
                 json={
@@ -231,7 +234,16 @@ async def test_order_api_persists_success_and_catalog_failure_without_contract_c
                     quantity=2,
                 ),
             )
-            reservation_id = reservation["reservation_id"]
+            reservation_ids[124] = reservation["reservation_id"]
+            failed_reservation = await inventory.reserve(
+                7,
+                InventoryReservationRequest(
+                    order_id=125,
+                    saga_id="00000000-0000-4000-8000-000000000003",
+                    quantity=11,
+                ),
+            )
+            reservation_ids[125] = failed_reservation["reservation_id"]
 
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app=order_module.app),
@@ -263,17 +275,33 @@ async def test_order_api_persists_success_and_catalog_failure_without_contract_c
                 assert response_body["status"] == "processed"
                 assert response_body["unit_price"] == "99.90"
                 assert response_body["total_amount"] == "199.80"
-                assert response_body["reservation_id"] == reservation_id
+                assert response_body["reservation_id"] == reservation_ids[124]
+
+                declined = await client.post(
+                    "/orders/125/process",
+                    json={"product_id": 7, "quantity": 11},
+                )
+                assert declined.status_code == 402
+                assert declined.json() == {
+                    "detail": (
+                        "Payment declined; completed actions were compensated."
+                    )
+                }
 
             repository = PostgresOrderRepository(order_module.database_manager)
             failed = await repository.get(123)
             processed = await repository.get(124)
+            payment_declined = await repository.get(125)
             assert failed is not None and failed["status"] == "product_not_found"
             assert failed["product_id"] is None
             assert failed["requested_product_id"] == 999
             assert processed is not None and processed["status"] == "processed"
-            assert processed["reservation_id"] == reservation_id
+            assert processed["reservation_id"] == reservation_ids[124]
             assert processed["payment_id"] == response_body["payment_id"]
+            assert payment_declined is not None
+            assert payment_declined["status"] == "payment_declined"
+            assert payment_declined["reservation_id"] == reservation_ids[125]
+            assert payment_declined["payment_id"] is None
             assert workflow._orders == {}
     finally:
         await workflow.payment_gateway.reset()
