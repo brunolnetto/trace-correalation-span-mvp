@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from decimal import Decimal
 from threading import Lock
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
@@ -9,6 +10,8 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field
 from sagaz import Saga, SagaConfig, action, compensate
 from sagaz.core.listeners import SagaListener
+
+from app.persistence.ports import OrderRepository
 
 INVENTORY_API_URL = os.getenv("INVENTORY_API_URL", "http://localhost:8001")
 PAYMENT_DECLINE_ABOVE = float(os.getenv("PAYMENT_DECLINE_ABOVE", "1000"))
@@ -73,20 +76,47 @@ class PaymentGateway:
 payment_gateway = PaymentGateway()
 _orders: dict[int, dict[str, Any]] = {}
 _order_lock = Lock()
+_order_repository: OrderRepository | None = None
+
+
+def configure_order_repository(repository: OrderRepository | None) -> None:
+    """Select the durable repository, or the in-memory test double."""
+    global _order_repository
+    _order_repository = repository
+
+
+async def record_order_outcome(record: dict[str, Any]) -> dict[str, Any]:
+    """Store the latest accepted/rejected business outcome for an order ID."""
+    if _order_repository is not None:
+        return await _order_repository.save_outcome(record)
+
+    with _order_lock:
+        _orders[int(record["order_id"])] = dict(record)
+        return dict(_orders[int(record["order_id"])])
 
 
 async def persist_order(ctx: dict[str, Any]) -> dict[str, str]:
-    """Persist a completed order in the MVP's process-local order store."""
-    record = {
-        "order_id": ctx["order_id"],
-        "product_id": ctx["product_id"],
-        "quantity": ctx["quantity"],
-        "amount": ctx["amount"],
-        "saga_id": ctx["saga_id"],
-        "status": "processed",
-    }
-    with _order_lock:
-        _orders[int(ctx["order_id"])] = record
+    """Persist the successful terminal result of the Order Saga."""
+    unit_price = ctx.get("unit_price")
+    if unit_price is None:
+        unit_price = Decimal(str(ctx["amount"])) / int(ctx["quantity"])
+
+    await record_order_outcome(
+        {
+            "order_id": int(ctx["order_id"]),
+            "requested_product_id": int(ctx["product_id"]),
+            "product_id": int(ctx["product_id"]),
+            "quantity": int(ctx["quantity"]),
+            "unit_price": unit_price,
+            "total_amount": ctx["amount"],
+            "saga_id": ctx["saga_id"],
+            "reservation_id": ctx.get("reservation_id"),
+            "payment_id": ctx.get("payment_id"),
+            "status": "processed",
+            "failure_category": None,
+            "correlation_id": ctx.get("correlation_id"),
+        }
+    )
     return {"order_status": "processed"}
 
 
@@ -106,16 +136,24 @@ class CompensationTracker(SagaListener):
     def __init__(self) -> None:
         self._started: set[str] = set()
         self._completed: set[str] = set()
+        self._last_context: dict[str, Any] = {}
 
     async def on_compensation_start(
         self, saga_name: str, step_name: str, ctx: dict[str, Any]
     ) -> None:
         self._started.add(step_name)
+        self._last_context = dict(ctx)
 
     async def on_compensation_complete(
         self, saga_name: str, step_name: str, ctx: dict[str, Any]
     ) -> None:
         self._completed.add(step_name)
+        self._last_context = dict(ctx)
+
+    @property
+    def last_context(self) -> dict[str, Any]:
+        """Return the most recent context seen by a compensation callback."""
+        return dict(self._last_context)
 
     @property
     def incomplete_steps(self) -> list[str]:

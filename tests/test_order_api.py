@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 from importlib import import_module
 
 import httpx
@@ -124,6 +125,10 @@ async def test_process_order_returns_saga_result_and_correlation_id(monkeypatch)
     assert body["total_amount"] == "199.80"
     assert [request.method for request in requests] == ["GET", "POST"]
     assert requests[0].headers["X-Correlation-ID"] == correlation_id
+    persisted = workflow._orders[123]
+    assert persisted["status"] == "processed"
+    assert persisted["requested_product_id"] == 7
+    assert persisted["unit_price"] == Decimal("99.90")
 
 
 @pytest.mark.asyncio
@@ -139,6 +144,8 @@ async def test_payment_decline_returns_402_after_inventory_compensation(monkeypa
         "Payment declined; completed actions were compensated."
     )
     assert [request.method for request in requests] == ["GET", "POST", "DELETE"]
+    assert workflow._orders[123]["status"] == "payment_declined"
+    assert workflow._orders[123]["reservation_id"] == "reservation-api-test"
 
 
 @pytest.mark.asyncio
@@ -151,6 +158,7 @@ async def test_failed_compensation_returns_reconciliation_details(monkeypatch):
     )
 
     assert response.status_code == 500
+    assert workflow._orders[123]["status"] == "compensation_incomplete"
     detail = response.json()["detail"]
     assert detail["message"] == (
         "Order processing failed and compensation is incomplete."
@@ -169,7 +177,7 @@ async def test_inventory_conflict_returns_409_without_charging_payment(monkeypat
 
     assert response.status_code == 409
     assert [request.method for request in requests] == ["GET", "POST"]
-    assert workflow._orders == {}
+    assert workflow._orders[123]["status"] == "inventory_rejected"
 
 
 @pytest.mark.asyncio
@@ -183,7 +191,7 @@ async def test_inactive_product_returns_409_without_reserving_stock(monkeypatch)
     assert response.status_code == 409
     assert response.json()["detail"] == "Product is inactive."
     assert [request.method for request in requests] == ["GET"]
-    assert workflow._orders == {}
+    assert workflow._orders[123]["status"] == "product_inactive"
 
 
 @pytest.mark.asyncio
@@ -197,7 +205,9 @@ async def test_unknown_product_returns_404_without_charging_payment(monkeypatch)
     assert response.status_code == 404
     assert response.json()["detail"] == "Product not found."
     assert [request.method for request in requests] == ["GET"]
-    assert workflow._orders == {}
+    assert workflow._orders[123]["status"] == "product_not_found"
+    assert workflow._orders[123]["product_id"] is None
+    assert workflow._orders[123]["requested_product_id"] == 7
 
 
 @pytest.mark.asyncio

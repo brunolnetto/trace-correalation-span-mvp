@@ -113,6 +113,16 @@ if [[ "$BUILD" == "1" ]]; then
   up_args+=(--build)
 fi
 
+echo "Starting PostgreSQL and applying schema migrations..."
+if ! "${COMPOSE[@]}" up --detach --wait postgres; then
+  echo "Could not start the PostgreSQL service." >&2
+  exit 1
+fi
+if ! bash scripts/migrate.sh; then
+  echo "PostgreSQL migration failed; application services will not start." >&2
+  exit 1
+fi
+
 echo "Starting the standalone Compose stack..."
 if "${COMPOSE[@]}" "${up_args[@]}"; then
   :

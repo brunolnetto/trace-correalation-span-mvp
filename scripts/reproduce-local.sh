@@ -14,11 +14,21 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 REPRO_CORRELATION_IDS=()
-ORDER_URL="${ORDER_URL:-http://127.0.0.1:18000}"
-INVENTORY_URL="${INVENTORY_URL:-http://127.0.0.1:18001}"
-JAEGER_URL="${JAEGER_URL:-http://127.0.0.1:16686}"
-SUPPLIER_URL="${SUPPLIER_URL:-http://127.0.0.1:18002}"
-EVENT_COLLECTOR_URL="${EVENT_COLLECTOR_URL:-http://127.0.0.1:18003}"
+ORDER_API_HOST_PORT="${ORDER_API_HOST_PORT:-18000}"
+INVENTORY_API_HOST_PORT="${INVENTORY_API_HOST_PORT:-18001}"
+SUPPLIER_HOST_PORT="${SUPPLIER_HOST_PORT:-18002}"
+EVENT_COLLECTOR_HOST_PORT="${EVENT_COLLECTOR_HOST_PORT:-18003}"
+JAEGER_UI_HOST_PORT="${JAEGER_UI_HOST_PORT:-16686}"
+OTLP_GRPC_HOST_PORT="${OTLP_GRPC_HOST_PORT:-4317}"
+OTLP_HTTP_HOST_PORT="${OTLP_HTTP_HOST_PORT:-4318}"
+export ORDER_API_HOST_PORT INVENTORY_API_HOST_PORT SUPPLIER_HOST_PORT
+export EVENT_COLLECTOR_HOST_PORT JAEGER_UI_HOST_PORT OTLP_GRPC_HOST_PORT OTLP_HTTP_HOST_PORT
+ORDER_URL="${ORDER_URL:-http://127.0.0.1:${ORDER_API_HOST_PORT}}"
+INVENTORY_URL="${INVENTORY_URL:-http://127.0.0.1:${INVENTORY_API_HOST_PORT}}"
+JAEGER_URL="${JAEGER_URL:-http://127.0.0.1:${JAEGER_UI_HOST_PORT}}"
+SUPPLIER_URL="${SUPPLIER_URL:-http://127.0.0.1:${SUPPLIER_HOST_PORT}}"
+EVENT_COLLECTOR_URL="${EVENT_COLLECTOR_URL:-http://127.0.0.1:${EVENT_COLLECTOR_HOST_PORT}}"
+export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-15432}"
 WAIT_SECONDS="${WAIT_SECONDS:-60}"
 CLEANUP=0
 
@@ -69,14 +79,18 @@ if ! git ls-files --error-unmatch uv.lock >/dev/null 2>&1; then
   echo "NOTE: uv.lock is generated locally but is not committed. Review and commit it for repeatable installs."
 fi
 
-echo "==> 2/7: Run unit and concurrency tests"
-uv run --python 3.12 pytest
+echo "==> 2/7: Start PostgreSQL and run unit/integration tests"
+docker compose up --detach --wait postgres
+POSTGRES_TEST_URL="${POSTGRES_TEST_URL:-postgresql://app:app@127.0.0.1:${POSTGRES_HOST_PORT}/app}" \
+  uv run --python 3.12 pytest
 
 echo "==> 3/7: Run Ruff"
 uv run --python 3.12 ruff check .
 
-echo "==> 4/7: Build and start Jaeger, APIs, supplier, and event collector"
+echo "==> 4/7: Migrate PostgreSQL and start Jaeger, APIs, supplier, and event collector"
 docker compose down --remove-orphans
+docker compose up --detach --wait postgres
+bash scripts/migrate.sh
 docker compose up --build --detach
 
 wait_for_url() {

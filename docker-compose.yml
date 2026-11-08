@@ -1,12 +1,30 @@
 services:
+  postgres:
+    image: postgres:16.6
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./migrations:/migrations:ro
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-15432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
   jaeger:
     image: jaegertracing/all-in-one:1.62.0
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     ports:
-      - "16686:16686"
-      - "4317:4317"
-      - "4318:4318"
+      - "${JAEGER_UI_HOST_PORT:-16686}:16686"
+      - "${OTLP_GRPC_HOST_PORT:-4317}:4317"
+      - "${OTLP_HTTP_HOST_PORT:-4318}:4318"
 
   event-collector:
     build: .
@@ -27,7 +45,7 @@ services:
     volumes:
       - event-data:/data
     ports:
-      - "127.0.0.1:18003:8010"
+      - "127.0.0.1:${EVENT_COLLECTOR_HOST_PORT:-18003}:8010"
     healthcheck:
       test:
         - CMD
@@ -49,11 +67,15 @@ services:
       SERVICE_NAME: inventory-api
       EVENT_COLLECTOR_URL: http://event-collector:8010
       INVENTORY_SEED_DEMO_DATA: "true"
+      PERSISTENCE_BACKEND: postgres
+      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-app}
+      DATABASE_POOL_MIN_SIZE: "1"
+      DATABASE_POOL_MAX_SIZE: "10"
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
       OTEL_TRACES_SAMPLER_ARG: "1.0"
       ENVIRONMENT: development
     ports:
-      - "127.0.0.1:18001:8001"
+      - "127.0.0.1:${INVENTORY_API_HOST_PORT:-18001}:8001"
     healthcheck:
       test:
         - CMD
@@ -69,6 +91,8 @@ services:
         condition: service_started
       event-collector:
         condition: service_healthy
+      postgres:
+        condition: service_healthy
 
   order-api:
     build: .
@@ -77,11 +101,15 @@ services:
       SERVICE_NAME: order-api
       EVENT_COLLECTOR_URL: http://event-collector:8010
       INVENTORY_API_URL: http://inventory-api:8001
+      PERSISTENCE_BACKEND: postgres
+      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-app}
+      DATABASE_POOL_MIN_SIZE: "1"
+      DATABASE_POOL_MAX_SIZE: "10"
       OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
       OTEL_TRACES_SAMPLER_ARG: "1.0"
       ENVIRONMENT: development
     ports:
-      - "127.0.0.1:18000:8000"
+      - "127.0.0.1:${ORDER_API_HOST_PORT:-18000}:8000"
     healthcheck:
       test:
         - CMD
@@ -98,6 +126,8 @@ services:
       inventory-api:
         condition: service_healthy
       event-collector:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
   supplier-simulator:
@@ -117,7 +147,7 @@ services:
       OTEL_TRACES_SAMPLER_ARG: "1.0"
       ENVIRONMENT: development
     ports:
-      - "127.0.0.1:18002:8002"
+      - "127.0.0.1:${SUPPLIER_HOST_PORT:-18002}:8002"
     healthcheck:
       test:
         - CMD
@@ -237,6 +267,7 @@ services:
         condition: service_completed_successfully
 
 volumes:
+  postgres-data:
   event-data:
   analytics-data:
   run-state:
