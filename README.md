@@ -90,7 +90,7 @@ A product can exist without any stock. Creating a product does not create
 inventory:
 
 ```bash
-curl -i -X POST http://localhost:18001/products \
+api_curl -i -X POST http://localhost:18001/products \
   -H 'Content-Type: application/json' \
   -d '{
     "sku": "COFFEE-250G",
@@ -104,7 +104,7 @@ The returned `product_id` is used for inventory operations. Stock enters the
 system through an explicit, idempotent receipt:
 
 ```bash
-curl -i -X POST http://localhost:18001/inventory/8/receipts \
+api_curl -i -X POST http://localhost:18001/inventory/8/receipts \
   -H 'Content-Type: application/json' \
   -d '{
     "quantity": 50,
@@ -171,7 +171,7 @@ The Compose profile seeds one explicit demo product (ID 7, 42 units). The
 original read-only endpoint remains available:
 
 ```bash
-curl -i http://localhost:18000/orders/7 \
+api_curl -i http://localhost:18000/orders/7 \
   -H 'X-Correlation-ID: 550e8400-e29b-41d4-a716-446655440000'
 ```
 
@@ -186,7 +186,7 @@ the inventory server span, and `inventory.lookup`.
 Submit a request to run the order workflow:
 
 ```bash
-curl -i -X POST http://localhost:18000/orders/123/process \
+api_curl -i -X POST http://localhost:18000/orders/123/process \
   -H 'Content-Type: application/json' \
   -H 'X-Correlation-ID: 550e8400-e29b-41d4-a716-446655440001' \
   -d '{
@@ -272,8 +272,8 @@ contains deterministic supplier offers. Onboarding creates a product through
 the Inventory API and installs a default reorder policy:
 
 ```bash
-curl http://localhost:18002/supplier-catalog
-curl -X POST http://localhost:18002/supplier-catalog/BEANS-250/onboard
+api_curl http://localhost:18002/supplier-catalog
+api_curl -X POST http://localhost:18002/supplier-catalog/BEANS-250/onboard
 ```
 
 A policy defines `reorder_point`, `target_stock`, and
@@ -292,8 +292,8 @@ them as available units.
 Evaluate all configured policies or just one product:
 
 ```bash
-curl -X POST http://localhost:18002/replenishments/evaluate
-curl -X POST 'http://localhost:18002/replenishments/evaluate?product_id=8'
+api_curl -X POST http://localhost:18002/replenishments/evaluate
+api_curl -X POST 'http://localhost:18002/replenishments/evaluate?product_id=8'
 ```
 
 Purchase orders follow `created -> ordered -> receiving -> received` or
@@ -302,10 +302,10 @@ lead time. The simulation clock can be advanced explicitly, so tests do not
 sleep while waiting for supplier deliveries:
 
 ```bash
-curl -X POST http://localhost:18002/purchase-orders/<po-id>/order
-curl -X POST http://localhost:18002/clock/advance \
+api_curl -X POST http://localhost:18002/purchase-orders/<po-id>/order
+api_curl -X POST http://localhost:18002/clock/advance \
   -H 'Content-Type: application/json' -d '{"seconds":3600}'
-curl -X POST http://localhost:18002/purchase-orders/<po-id>/receive
+api_curl -X POST http://localhost:18002/purchase-orders/<po-id>/receive
 ```
 
 Supplier offerings, onboarding references, reorder policies, purchase orders,
@@ -392,9 +392,9 @@ preserved for inspection.
 Inspect collected data:
 
 ```bash
-curl 'http://localhost:18003/v1/events?limit=100'
-curl 'http://localhost:18003/v1/quarantine?limit=100'
-curl http://localhost:18003/v1/stats
+api_curl 'http://localhost:18003/v1/events?limit=100'
+api_curl 'http://localhost:18003/v1/quarantine?limit=100'
+api_curl http://localhost:18003/v1/stats
 ```
 
 The Compose named volume `event-data` persists both JSONL files across
@@ -672,6 +672,27 @@ development account defaults to username `local-user`; its generated password
 is stored as `LOCAL_DEVELOPER_PASSWORD` in `.env`. The broad confidential
 `local-developer` client is for the deterministic reproduction script only;
 it is not the human login client.
+
+For manual cURL examples below, obtain a short-lived local operator token
+after the Compose stack is running:
+
+\`\`\`bash
+set -a
+source .env
+set +a
+DEV_ACCESS_TOKEN="$(curl --silent --show-error --fail \\
+  --user "local-developer:$LOCAL_DEVELOPER_CLIENT_SECRET" \\
+  --data-urlencode "grant_type=client_credentials" \\
+  --data-urlencode "scope=catalog:read catalog:write orders:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive inventory:adjust suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest events:read operations:read" \\
+  http://localhost:18080/realms/trace-local/protocol/openid-connect/token \\
+  | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])')"
+api_curl() {
+  curl --header "Authorization: Bearer $DEV_ACCESS_TOKEN" "$@"
+}
+\`\`\`
+
+This broad operator token is local-development convenience only. Swagger UI
+uses the separate human \`local-user\` login and PKCE client.
 
 The reproduction script creates this local environment and obtains its
 operator token automatically:
