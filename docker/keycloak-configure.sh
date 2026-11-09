@@ -170,17 +170,23 @@ ensure_browser_client() {
     printf '  "implicitFlowEnabled": false,\n'
     printf '  "attributes": {"pkce.code.challenge.method":"S256"},\n'
     printf '  "redirectUris": [\n'
-    printf '    "http://localhost:%s/docs/oauth2-redirect",\n' "$ORDER_API_HOST_PORT"
-    printf '    "http://localhost:%s/docs/oauth2-redirect",\n' "$INVENTORY_API_HOST_PORT"
-    printf '    "http://localhost:%s/docs/oauth2-redirect",\n' "$SUPPLIER_HOST_PORT"
-    printf '    "http://localhost:%s/docs/oauth2-redirect"\n' "$EVENT_COLLECTOR_HOST_PORT"
-    printf '  ],\n'
+    local first=1 host port
+    for port in "$ORDER_API_HOST_PORT" "$INVENTORY_API_HOST_PORT" "$SUPPLIER_HOST_PORT" "$EVENT_COLLECTOR_HOST_PORT"; do
+      for host in localhost 127.0.0.1; do
+        if (( first )); then first=0; else printf ',\n'; fi
+        printf '    "http://%s:%s/docs/oauth2-redirect"' "$host" "$port"
+      done
+    done
+    printf '\n  ],\n'
     printf '  "webOrigins": [\n'
-    printf '    "http://localhost:%s",\n' "$ORDER_API_HOST_PORT"
-    printf '    "http://localhost:%s",\n' "$INVENTORY_API_HOST_PORT"
-    printf '    "http://localhost:%s",\n' "$SUPPLIER_HOST_PORT"
-    printf '    "http://localhost:%s"\n' "$EVENT_COLLECTOR_HOST_PORT"
-    printf '  ],\n'
+    first=1
+    for port in "$ORDER_API_HOST_PORT" "$INVENTORY_API_HOST_PORT" "$SUPPLIER_HOST_PORT" "$EVENT_COLLECTOR_HOST_PORT"; do
+      for host in localhost 127.0.0.1; do
+        if (( first )); then first=0; else printf ',\n'; fi
+        printf '    "http://%s:%s"' "$host" "$port"
+      done
+    done
+    printf '\n  ],\n'
     printf '  "defaultOptionalClientScopes": ['
     local first=1 scope
     for scope in $ALL_SCOPES; do
