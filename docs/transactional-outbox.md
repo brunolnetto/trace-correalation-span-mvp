@@ -12,8 +12,8 @@ transaction as the domain mutation. Database triggers cover:
   movements.
 - Order creation/status transitions.
 - Supplier onboarding and reorder-policy creation/updates.
-- Supplier purchase-order creation, ordering, receipt, and cancellation
-  transitions.
+- Supplier purchase-order creation, ordering, receiving, receipt, and
+  cancellation transitions.
 - Supplier replenishment decisions, including no-reorder and existing-PO
   outcomes.
 
