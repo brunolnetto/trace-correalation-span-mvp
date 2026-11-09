@@ -32,7 +32,9 @@ BUSINESS_EVENT_NAMES = frozenset(
         "supplier.reorder_policy.updated",
         "supplier.replenishment.evaluated",
         "supplier.purchase_order.ordered",
+        "supplier.purchase_order.receiving",
         "supplier.purchase_order.received",
+        "supplier.purchase_order.created",
         "supplier.purchase_order.cancelled",
     }
 )
