@@ -202,7 +202,7 @@ class PostgresOrderSagaRepository:
                     (
                         saga_id,
                         step_name,
-                        "not_required",
+                        "pending" if _compensation_name else "not_required",
                     ),
                 )
             return await self._load_with_connection(connection, record["saga_id"])
