@@ -13,6 +13,7 @@ cleanup_sensitive_files() {
   for file in "${TEMP_FILES[@]}"; do
     if [[ -f "$file" ]]; then
       : > "$file"
+      rm -f "$file"
     fi
   done
 }
