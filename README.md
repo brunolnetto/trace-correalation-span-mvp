@@ -670,12 +670,14 @@ with PostgreSQL advisory locks, and exposes incomplete work at
 `GET /orders/{order_id}/recovery`. See
 [the Order Saga recovery contract](docs/order-saga-recovery.md).
 
-This MVP sends traces directly to Jaeger and writes logs to container stdout;
-selected structured logs are also stored in append-only raw JSONL files by the
-Event Collector. It does not include an OpenTelemetry Collector, a full log
-search backend for analytics events, a production payment provider, a
-transactional producer outbox, authentication, or production deployment
-hardening. The event collector is single-writer and its producer queue is
-best-effort before acknowledgement. Sagaz is used for workflow orchestration
-and compensation; its in-memory configuration here is not a substitute for
-durable state and reconciliation infrastructure.
+Diagnostic traces and logs are routed through the OpenTelemetry Collector to
+Jaeger and Loki, with Grafana provisioned for local exploration. The Event
+Collector remains the business-event sink for dbt analytics; its producer
+queue is best-effort before acknowledgement. The outbox dispatcher separately
+provides durable at-least-once delivery for transactional domain events.
+
+API authentication and domain-level authorization are not implemented yet;
+they are tracked in [issue #27](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/27).
+Production deployment hardening is tracked in issue #29. The payment gateway
+remains a deterministic local simulator; real provider integration is tracked
+in issue #28.
