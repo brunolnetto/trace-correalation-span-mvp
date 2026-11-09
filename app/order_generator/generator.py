@@ -15,9 +15,8 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
 
-from app.security import service_authorization_headers
-
 from app.event_publisher import build_event_envelope
+from app.security import service_authorization_headers
 
 Mode = Literal["random", "coverage"]
 
