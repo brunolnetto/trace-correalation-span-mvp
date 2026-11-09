@@ -134,7 +134,7 @@ class AuthSettings:
                 + ", ".join(missing)
             )
 
-        environment = os.getenv("ENVIRONMENT", "development").lower()
+        environment = os.getenv("ENVIRONMENT", "production").lower()
         issuer = os.environ["OIDC_ISSUER"].rstrip("/")
         token_url = os.environ["OIDC_TOKEN_URL"]
         introspection_url = os.environ["OIDC_INTROSPECTION_URL"]
@@ -167,6 +167,10 @@ class AuthSettings:
             timeout_seconds=timeout,
             cache_ttl_seconds=cache_ttl,
         )
+
+
+# Fail at process startup when an API is deployed without a complete identity configuration.
+_STARTUP_AUTH_SETTINGS = AuthSettings.from_env()
 
 
 @dataclass(frozen=True, slots=True)
