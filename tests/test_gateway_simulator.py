@@ -7,6 +7,10 @@ import httpx
 import pytest
 
 from app import observability
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+from app.gateway_simulator.metrics import GatewayMetrics, metric_attributes
 from app.gateway_simulator.policy import (
     GatewayPolicy,
     GatewayRuntime,
@@ -456,3 +460,67 @@ async def test_baseline_degraded_policy_and_recovery_are_observable():
     assert recovered.status_code == 200
     assert recovered.headers["x-gateway-policy-revision"] == "3"
     assert upstream_calls == 2
+
+
+
+def test_gateway_metric_dimensions_are_bounded():
+    attributes = metric_attributes(
+        "CUSTOM-VERB",
+        503,
+        "untrusted-route-specific-outcome",
+    )
+
+    assert attributes == {
+        "http.request.method": "_OTHER",
+        "http.response.status_code": 503,
+        "gateway.simulation.outcome": "server_error",
+    }
+
+
+@pytest.mark.asyncio
+async def test_gateway_records_request_counter_and_duration_histogram():
+    reader = InMemoryMetricReader()
+    provider = MeterProvider(metric_readers=[reader])
+    gateway_app.state.gateway_metrics = GatewayMetrics(
+        provider.get_meter("gateway-metrics-test")
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=gateway_app),
+        base_url="http://gateway.test",
+    ) as client:
+        forwarded = await client.get("/orders/metric-test")
+        unmatched = await client.get("/not-configured")
+        health = await client.get("/_simulator/healthz")
+
+    assert forwarded.status_code == 200
+    assert unmatched.status_code == 404
+    assert health.status_code == 200
+
+    metric_data = reader.get_metrics_data()
+    recorded = {
+        metric.name: metric.data
+        for resource in metric_data.resource_metrics
+        for scope in resource.scope_metrics
+        for metric in scope.metrics
+    }
+    request_points = recorded["gateway.requests"].data_points
+    duration_points = recorded["gateway.request.duration"].data_points
+
+    assert sum(point.value for point in request_points) == 2
+    assert sum(point.count for point in duration_points) == 2
+    assert {
+        point.attributes["gateway.simulation.outcome"]
+        for point in request_points
+    } == {"forwarded", "client_error"}
+    assert all(
+        "http.request.method" in point.attributes
+        and "http.response.status_code" in point.attributes
+        for point in request_points
+    )
+    assert all(
+        "correlation_id" not in point.attributes
+        and "route_id" not in point.attributes
+        for point in request_points
+    )
+    provider.shutdown()
