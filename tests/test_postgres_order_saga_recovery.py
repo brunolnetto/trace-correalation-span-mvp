@@ -30,6 +30,8 @@ from app.persistence.migrations import MIGRATIONS_DIR, apply_migrations
 
 
 @pytest.fixture
+
+
 def isolated_postgres_schema():
     database_url = os.getenv("POSTGRES_TEST_URL")
     if not database_url:
@@ -156,6 +158,8 @@ class CompensationResponseLostSaga:
 
 
 @pytest.mark.asyncio
+
+
 async def test_payment_commit_before_checkpoint_is_replayed_idempotently(
     isolated_postgres_schema,
 ):
@@ -229,6 +233,8 @@ async def test_payment_commit_before_checkpoint_is_replayed_idempotently(
 
 
 @pytest.mark.asyncio
+
+
 async def test_compensation_after_remote_commit_is_retried_after_restart(
     isolated_postgres_schema,
     monkeypatch,
@@ -334,6 +340,8 @@ class InventoryResponseLostSaga:
 
 
 @pytest.mark.asyncio
+
+
 async def test_execution_created_before_first_step_is_run_after_restart(
     isolated_postgres_schema,
 ):
@@ -373,6 +381,8 @@ async def test_execution_created_before_first_step_is_run_after_restart(
 
 
 @pytest.mark.asyncio
+
+
 async def test_inventory_commit_before_checkpoint_is_replayed_with_same_key(
     isolated_postgres_schema,
 ):
@@ -428,6 +438,7 @@ async def test_inventory_commit_before_checkpoint_is_replayed_with_same_key(
     finally:
         await restarted_database.close()
 
+
 class OrderConfirmationResponseLostSaga:
     """Simulates an order upsert commit followed by a lost step response."""
 
@@ -455,6 +466,8 @@ class OrderConfirmationResponseLostSaga:
 
 
 @pytest.mark.asyncio
+
+
 async def test_order_confirmation_commit_before_checkpoint_is_idempotent(
     isolated_postgres_schema,
 ):
@@ -525,6 +538,7 @@ async def test_order_confirmation_commit_before_checkpoint_is_idempotent(
         configure_order_repository(None)
         await restarted_database.close()
 
+
 class ConfirmFailureAfterChargeSaga:
     """Exercises refund-before-release compensation and a lost refund checkpoint."""
 
@@ -565,6 +579,8 @@ class ConfirmFailureAfterChargeSaga:
 
 
 @pytest.mark.asyncio
+
+
 async def test_restart_retries_refund_before_inventory_release(
     isolated_postgres_schema,
     monkeypatch,
@@ -644,6 +660,7 @@ async def test_restart_retries_refund_before_inventory_release(
     finally:
         await restarted_database.close()
 
+
 class PostgresInventoryOrderSaga:
     """Uses the actual PostgreSQL Inventory adapter for reservation/release."""
 
@@ -695,6 +712,8 @@ class PostgresInventoryOrderSaga:
 
 
 @pytest.mark.asyncio
+
+
 async def test_real_inventory_reservation_is_not_duplicated_after_lost_response(
     isolated_postgres_schema,
 ):
@@ -764,6 +783,8 @@ async def test_real_inventory_reservation_is_not_duplicated_after_lost_response(
 
 
 @pytest.mark.asyncio
+
+
 async def test_real_inventory_release_is_idempotent_after_compensation_restart(
     isolated_postgres_schema,
     monkeypatch,
@@ -855,4 +876,3 @@ async def test_real_inventory_release_is_idempotent_after_compensation_restart(
         assert reserve_step["compensation_status"] == "completed"
     finally:
         await restarted_database.close()
-
