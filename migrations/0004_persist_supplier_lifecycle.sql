@@ -42,6 +42,7 @@ CREATE TABLE supplier_reorder_policies (
         lead_time_seconds >= 0 AND lead_time_seconds <= 31536000
     ),
     version BIGINT NOT NULL CHECK (version > 0),
+    inventory_revision BIGINT NOT NULL DEFAULT 0 CHECK (inventory_revision >= 0),
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
 );
