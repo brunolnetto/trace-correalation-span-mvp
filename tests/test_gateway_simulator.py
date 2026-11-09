@@ -1,12 +1,26 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import json
+import logging
 from importlib import import_module
 
 import httpx
 import pytest
+from fastapi import FastAPI
+from opentelemetry import trace
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
+    InMemorySpanExporter,
+)
+from opentelemetry.trace import SpanKind
 
 from app import observability
 from app.gateway_simulator.metrics import (
@@ -539,41 +553,133 @@ async def test_gateway_records_request_counter_and_duration_histogram():
 
 
 @pytest.mark.asyncio
-async def test_proxy_preserves_w3c_trace_context_and_correlation_id():
-    captured_headers: dict[str, str | None] = {}
+async def test_gateway_and_downstream_share_w3c_trace_and_correlated_logs():
+    provider = TracerProvider(
+        resource=Resource.create({"service.name": "trace-context-test"})
+    )
+    exporter = InMemorySpanExporter()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
 
-    async def upstream_handler(request: httpx.Request) -> httpx.Response:
-        captured_headers["traceparent"] = request.headers.get("traceparent")
-        captured_headers["tracestate"] = request.headers.get("tracestate")
-        captured_headers["correlation_id"] = request.headers.get("x-correlation-id")
-        return httpx.Response(200, json={"ok": True})
+    client_instrumentor = HTTPXClientInstrumentor()
+    was_client_instrumented = client_instrumentor.is_instrumented_by_opentelemetry
+    previous_provider = trace.get_tracer_provider()
+    if was_client_instrumented:
+        client_instrumentor.uninstrument()
+    client_instrumentor.instrument(tracer_provider=provider)
 
-    await gateway_app.state.http_client.aclose()
-    gateway_app.state.http_client = httpx.AsyncClient(
-        transport=httpx.MockTransport(upstream_handler)
+    captured: dict[str, str | None] = {}
+    downstream = FastAPI()
+
+    @downstream.get("/orders/probe")
+    async def downstream_probe(request):
+        captured["traceparent"] = request.headers.get("traceparent")
+        captured["tracestate"] = request.headers.get("tracestate")
+        captured["correlation_id"] = observability.correlation_id_context.get()
+        logging.getLogger("test.downstream").info("downstream.probe")
+        return {"ok": True}
+
+    downstream.add_middleware(observability.CorrelationIdMiddleware)
+    FastAPIInstrumentor.instrument_app(downstream, tracer_provider=provider)
+
+    gateway = FastAPI()
+    gateway.include_router(gateway_app.router)
+    gateway.add_middleware(observability.CorrelationIdMiddleware)
+    FastAPIInstrumentor.instrument_app(gateway, tracer_provider=provider)
+
+    gateway.state.policy_store = PolicyStore(make_policy())
+    gateway.state.gateway_runtime = GatewayRuntime()
+    gateway.state.http_client = httpx.AsyncClient(
+        base_url="http://order.test",
+        transport=httpx.ASGITransport(app=downstream),
     )
 
-    traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
-    tracestate = "vendor=value"
     correlation_id = "550e8400-e29b-41d4-a716-446655440011"
+    log_stream = io.StringIO()
+    log_handler = logging.StreamHandler(log_stream)
+    log_handler.setFormatter(observability.JsonFormatter("trace-context-test"))
+    root_logger = logging.getLogger()
+    previous_log_level = root_logger.level
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(log_handler)
 
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=gateway_app),
-        base_url="http://gateway.test",
-    ) as client:
-        response = await client.get(
-            "/orders/trace-context",
-            headers={
-                "traceparent": traceparent,
-                "tracestate": tracestate,
-                "X-Correlation-ID": correlation_id,
-            },
+    try:
+        tracer = provider.get_tracer("trace-context-test")
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=gateway),
+            base_url="http://gateway.test",
+        ) as client:
+            with tracer.start_as_current_span("test.caller") as caller_span:
+                response = await client.get(
+                    "/orders/probe",
+                    headers={"X-Correlation-ID": correlation_id},
+                )
+                caller_trace_id = caller_span.get_span_context().trace_id
+
+        assert response.status_code == 200
+        assert response.headers["x-correlation-id"] == correlation_id
+        assert captured["correlation_id"] == correlation_id
+        assert captured["tracestate"] is None
+        assert captured["traceparent"] is not None
+
+        spans = exporter.get_finished_spans()
+        gateway_server = next(
+            span
+            for span in spans
+            if span.kind is SpanKind.SERVER
+            and span.attributes.get("http.route") == "/{path:path}"
+        )
+        downstream_server = next(
+            span
+            for span in spans
+            if span.kind is SpanKind.SERVER
+            and span.attributes.get("http.route") == "/orders/probe"
+        )
+        gateway_client = next(
+            span
+            for span in spans
+            if span.kind is SpanKind.CLIENT
+            and span.parent is not None
+            and span.parent.span_id == gateway_server.context.span_id
         )
 
-    assert response.status_code == 200
-    assert response.headers["x-correlation-id"] == correlation_id
-    assert captured_headers == {
-        "traceparent": traceparent,
-        "tracestate": tracestate,
-        "correlation_id": correlation_id,
-    }
+        trace_id = gateway_server.context.trace_id
+        assert trace_id == caller_trace_id
+        assert downstream_server.context.trace_id == trace_id
+        assert gateway_client.context.trace_id == trace_id
+        assert gateway_client.parent is not None
+        assert gateway_client.parent.span_id == gateway_server.context.span_id
+        assert downstream_server.parent is not None
+        assert downstream_server.parent.span_id == gateway_client.context.span_id
+
+        traceparent_parts = captured["traceparent"].split("-")
+        assert traceparent_parts[1] == f"{trace_id:032x}"
+        assert traceparent_parts[2] == f"{gateway_client.context.span_id:016x}"
+
+        logs = [
+            json.loads(line)
+            for line in log_stream.getvalue().splitlines()
+            if line.strip()
+        ]
+        gateway_log = next(
+            item for item in logs if item["message"] == "gateway.request.forwarded"
+        )
+        downstream_log = next(
+            item for item in logs if item["message"] == "downstream.probe"
+        )
+        expected_trace_id = f"{trace_id:032x}"
+        assert gateway_log["correlation_id"] == correlation_id
+        assert gateway_log["trace_id"] == expected_trace_id
+        assert gateway_log["span_id"] == f"{gateway_server.context.span_id:016x}"
+        assert downstream_log["correlation_id"] == correlation_id
+        assert downstream_log["trace_id"] == expected_trace_id
+        assert downstream_log["span_id"] == f"{downstream_server.context.span_id:016x}"
+    finally:
+        root_logger.removeHandler(log_handler)
+        root_logger.setLevel(previous_log_level)
+        await gateway.state.http_client.aclose()
+        FastAPIInstrumentor.uninstrument_app(gateway)
+        FastAPIInstrumentor.uninstrument_app(downstream)
+        client_instrumentor.uninstrument()
+        if was_client_instrumented:
+            client_instrumentor.instrument(tracer_provider=previous_provider)
+        provider.shutdown()
