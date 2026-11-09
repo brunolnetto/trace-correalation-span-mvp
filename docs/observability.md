@@ -17,7 +17,7 @@ The local stack keeps three concerns separate:
 | Collector OTLP/HTTP | http://localhost:4318 |
 | Collector health | http://localhost:13133/ |
 
-Host ports can be overridden with `JAEGER_UI_HOST_PORT`, `GRAFANA_HOST_PORT`, `LOKI_HOST_PORT`, `OTLP_GRPC_HOST_PORT`, and `OTLP_HTTP_HOST_PORT`.
+Host ports can be overridden with `JAEGER_UI_HOST_PORT`, `GRAFANA_HOST_PORT`, `LOKI_HOST_PORT`, `OTLP_GRPC_HOST_PORT`, `OTLP_HTTP_HOST_PORT`, and `OTEL_HEALTH_HOST_PORT`.
 
 ## Useful Loki queries
 
