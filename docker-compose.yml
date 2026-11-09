@@ -4,6 +4,7 @@ x-oidc-env: &oidc-env
   OIDC_TOKEN_URL: http://keycloak:8080/realms/trace-local/protocol/openid-connect/token
   OIDC_AUTHORIZATION_URL: http://localhost:${KEYCLOAK_HOST_PORT:-18080}/realms/trace-local/protocol/openid-connect/auth
   OIDC_PUBLIC_TOKEN_URL: http://localhost:${KEYCLOAK_HOST_PORT:-18080}/realms/trace-local/protocol/openid-connect/token
+  OIDC_PUBLIC_CLIENT_ID: local-web
   OIDC_INTROSPECTION_URL: http://keycloak:8080/realms/trace-local/protocol/openid-connect/token/introspect
   OIDC_TIMEOUT_SECONDS: "3"
   OIDC_INTROSPECTION_CACHE_SECONDS: "10"
