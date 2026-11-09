@@ -171,6 +171,7 @@ echo "    acquiring local developer access token from Keycloak"
 curl --ipv4 --silent --show-error --fail \
   --user "local-developer:$LOCAL_DEVELOPER_CLIENT_SECRET" \
   --data-urlencode "grant_type=client_credentials" \
+  --data-urlencode "scope=catalog:read catalog:write orders:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive inventory:adjust suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest events:read operations:read" \
   "$KEYCLOAK_URL/realms/trace-local/protocol/openid-connect/token" \
   > "$TMP_DIR/developer-token.json"
 DEV_ACCESS_TOKEN="$(python3 - "$TMP_DIR/developer-token.json" <<'PY'
