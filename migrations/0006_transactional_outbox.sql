@@ -346,6 +346,7 @@ BEGIN
     v_event_name := CASE NEW.to_status
         WHEN 'created' THEN 'supplier.purchase_order.created'
         WHEN 'ordered' THEN 'supplier.purchase_order.ordered'
+        WHEN 'receiving' THEN 'supplier.purchase_order.receiving'
         WHEN 'received' THEN 'supplier.purchase_order.received'
         WHEN 'cancelled' THEN 'supplier.purchase_order.cancelled'
         ELSE NULL
