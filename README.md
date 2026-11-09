@@ -676,23 +676,23 @@ it is not the human login client.
 For manual cURL examples below, obtain a short-lived local operator token
 after the Compose stack is running:
 
-\`\`\`bash
+```bash
 set -a
 source .env
 set +a
-DEV_ACCESS_TOKEN="$(curl --silent --show-error --fail \\
-  --user "local-developer:$LOCAL_DEVELOPER_CLIENT_SECRET" \\
-  --data-urlencode "grant_type=client_credentials" \\
-  --data-urlencode "scope=catalog:read catalog:write orders:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive inventory:adjust suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest events:read operations:read" \\
-  http://localhost:18080/realms/trace-local/protocol/openid-connect/token \\
+DEV_ACCESS_TOKEN="$(curl --silent --show-error --fail \
+  --user "local-developer:$LOCAL_DEVELOPER_CLIENT_SECRET" \
+  --data-urlencode "grant_type=client_credentials" \
+  --data-urlencode "scope=catalog:read catalog:write orders:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive inventory:adjust suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest events:read operations:read" \
+  http://localhost:18080/realms/trace-local/protocol/openid-connect/token \
   | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])')"
 api_curl() {
   curl --header "Authorization: Bearer $DEV_ACCESS_TOKEN" "$@"
 }
-\`\`\`
+```
 
 This broad operator token is local-development convenience only. Swagger UI
-uses the separate human \`local-user\` login and PKCE client.
+uses the separate human `local-user` login and PKCE client.
 
 The reproduction script creates this local environment and obtains its
 operator token automatically:
