@@ -327,6 +327,23 @@ class PostgresOrderSagaRepository:
                 """,
                 (_json_dump(context), saga_id),
             )
+            await connection.execute(
+                """
+                UPDATE orders AS o
+                SET reservation_id = COALESCE(
+                        NULLIF(e.context->>'reservation_id', '')::uuid,
+                        o.reservation_id
+                    ),
+                    payment_id = COALESCE(
+                        NULLIF(e.context->>'payment_id', ''),
+                        o.payment_id
+                    ),
+                    updated_at = now()
+                FROM order_saga_executions AS e
+                WHERE e.saga_id = %s AND o.order_id = e.order_id
+                """,
+                (saga_id,),
+            )
 
     async def mark_step_failed(
         self, saga_id: str, step_name: str, error: Exception
