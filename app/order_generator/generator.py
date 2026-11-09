@@ -232,7 +232,7 @@ async def execute_plan(
                     ),
                 )
             )
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, RuntimeError) as exc:
             elapsed_ms = (time.perf_counter() - started_at) * 1000
             attempts.append(
                 OrderAttempt(
