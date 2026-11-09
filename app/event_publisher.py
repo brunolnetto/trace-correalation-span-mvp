@@ -63,12 +63,12 @@ def build_event_envelope(
 
 
 class AsyncCollectorHandler(logging.Handler):
-    """Bounded, non-blocking logging handler with batched HTTP delivery.
+    """Best-effort forwarding for explicitly allowlisted non-transactional events.
 
-    Events accepted by the collector are durable and replay-safe. This
-    in-process queue is best-effort before collector acknowledgement: queue
-    overflow or an application crash can lose events, and the dropped counter
-    makes local delivery pressure visible.
+    In PostgreSQL mode, domain events captured by database triggers are
+    suppressed here and delivered by the transactional outbox. The in-process
+    queue remains only for events without a durable domain transaction (such
+    as generator attempts and rejected reservations).
     """
 
     def __init__(
