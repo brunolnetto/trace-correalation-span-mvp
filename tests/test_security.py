@@ -350,7 +350,7 @@ def test_swagger_uses_public_pkce_client(monkeypatch):
     assert config == {
         "clientId": "local-web",
         "usePkceWithAuthorizationCodeGrant": True,
-        "scopes": ["openid"],
+        "scopes": ["openid", *security._SCOPES],
     }
 
 
