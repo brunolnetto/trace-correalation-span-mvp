@@ -126,6 +126,10 @@ CREATE TRIGGER supplier_po_transitions_no_update
     BEFORE UPDATE OR DELETE ON supplier_purchase_order_transitions
     FOR EACH ROW EXECUTE FUNCTION reject_supplier_po_transition_mutation();
 
+CREATE TRIGGER supplier_po_transitions_no_truncate
+    BEFORE TRUNCATE ON supplier_purchase_order_transitions
+    FOR EACH STATEMENT EXECUTE FUNCTION reject_supplier_po_transition_mutation();
+
 CREATE TABLE supplier_simulation_clock (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
     current_time TIMESTAMPTZ NOT NULL
