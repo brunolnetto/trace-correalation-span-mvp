@@ -68,11 +68,53 @@ class SupplierSimulation:
         self._policies: dict[int, dict[str, Any]] = {}
         self._onboarded: dict[str, dict[str, Any]] = {}
         self._purchase_orders: dict[str, dict[str, Any]] = {}
+        self._purchase_order_transitions: dict[str, list[dict[str, Any]]] = {}
+        self._next_transition_id = 1
         self._next_policy_version = 1
         self._lock = asyncio.Lock()
 
     def _now_iso(self) -> str:
         return self._now.isoformat()
+
+
+    def _record_transition(
+        self,
+        purchase_order_id: str,
+        from_status: str | None,
+        to_status: str,
+        correlation_id: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        transitions = self._purchase_order_transitions.setdefault(
+            purchase_order_id, []
+        )
+        transitions.append(
+            {
+                "transition_id": self._next_transition_id,
+                "purchase_order_id": purchase_order_id,
+                "from_status": from_status,
+                "to_status": to_status,
+                "occurred_at": self._now_iso(),
+                "correlation_id": correlation_id or None,
+                "metadata": metadata or {},
+            }
+        )
+        self._next_transition_id += 1
+
+    async def list_purchase_order_transitions(
+        self, purchase_order_id: str
+    ) -> list[dict[str, Any]]:
+        async with self._lock:
+            if purchase_order_id not in self._purchase_orders:
+                raise KeyError(
+                    f"Purchase order {purchase_order_id} does not exist"
+                )
+            return [
+                item.copy()
+                for item in self._purchase_order_transitions.get(
+                    purchase_order_id, []
+                )
+            ]
 
     async def clock(self) -> dict[str, Any]:
         async with self._lock:
@@ -286,6 +328,17 @@ class SupplierSimulation:
                     "policy_version": policy["version"],
                 }
                 self._purchase_orders[purchase_order_id] = order
+                self._record_transition(
+                    purchase_order_id,
+                    None,
+                    "created",
+                    correlation_id,
+                    {
+                        "policy_version": policy["version"],
+                        "inventory_position": inventory_position,
+                        "quantity": quantity,
+                    },
+                )
                 decisions.append(
                     {
                         "product_id": current_product_id,
@@ -311,7 +364,9 @@ class SupplierSimulation:
                 raise KeyError(f"Purchase order {purchase_order_id} does not exist")
             return order.copy()
 
-    async def order_purchase_order(self, purchase_order_id: str) -> dict[str, Any]:
+    async def order_purchase_order(
+        self, purchase_order_id: str, correlation_id: str = ""
+    ) -> dict[str, Any]:
         async with self._lock:
             order = self._purchase_orders.get(purchase_order_id)
             if order is None:
@@ -326,6 +381,13 @@ class SupplierSimulation:
             order["due_at"] = (
                 now + timedelta(seconds=order["lead_time_seconds"])
             ).isoformat()
+            self._record_transition(
+                purchase_order_id,
+                "created",
+                "ordered",
+                correlation_id,
+                {"due_at": order["due_at"]},
+            )
             return order.copy()
 
     async def receive_purchase_order(
@@ -346,6 +408,13 @@ class SupplierSimulation:
                     raise ValueError("Supplier lead time has not elapsed")
                 order["status"] = "receiving"
                 order["receiving_started_at"] = self._now_iso()
+                self._record_transition(
+                    purchase_order_id,
+                    "ordered",
+                    "receiving",
+                    correlation_id,
+                    {"idempotency_key": f"supplier-po:{purchase_order_id}"},
+                )
             elif order["status"] != "receiving":
                 raise ValueError(
                     "Only ordered or receiving purchase orders can be received"
@@ -376,10 +445,20 @@ class SupplierSimulation:
             order["status"] = "received"
             order["received_at"] = self._now_iso()
             order["receipt_id"] = receipt["receipt_id"]
+            self._record_transition(
+                purchase_order_id,
+                "receiving",
+                "received",
+                correlation_id,
+                {
+                    "receipt_id": receipt["receipt_id"],
+                    "quantity": quantity,
+                },
+            )
             return order.copy()
 
     async def cancel_purchase_order(
-        self, purchase_order_id: str
+        self, purchase_order_id: str, correlation_id: str = ""
     ) -> dict[str, Any]:
         async with self._lock:
             order = self._purchase_orders.get(purchase_order_id)
@@ -391,6 +470,9 @@ class SupplierSimulation:
                 raise ValueError("Only created purchase orders can be cancelled")
             order["status"] = "cancelled"
             order["cancelled_at"] = self._now_iso()
+            self._record_transition(
+                purchase_order_id, "created", "cancelled", correlation_id
+            )
             return order.copy()
 
     async def reset(self) -> None:
@@ -398,4 +480,6 @@ class SupplierSimulation:
             self._policies.clear()
             self._onboarded.clear()
             self._purchase_orders.clear()
+            self._purchase_order_transitions.clear()
+            self._next_transition_id = 1
             self._next_policy_version = 1
