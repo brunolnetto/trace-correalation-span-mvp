@@ -2,11 +2,23 @@
 set -Eeuo pipefail
 umask 077
 
-KCADM="/opt/keycloak/bin/kcadm.sh"
+KCADM_CONFIG="/tmp/keycloak-admin-$.config"
+KCADM=(/opt/keycloak/bin/kcadm.sh --config "$KCADM_CONFIG")
 REALM="trace-local"
 SERVER="http://keycloak:8080"
+TEMP_FILES=("$KCADM_CONFIG")
 
-if ! "$KCADM" config credentials \
+cleanup_sensitive_files() {
+  local file
+  for file in "${TEMP_FILES[@]}"; do
+    if [[ -f "$file" ]]; then
+      : > "$file"
+    fi
+  done
+}
+trap cleanup_sensitive_files EXIT
+
+if ! "${KCADM[@]}" config credentials \
   --server "$SERVER" \
   --realm master \
   --user "$KC_BOOTSTRAP_ADMIN_USERNAME" \
@@ -15,8 +27,8 @@ if ! "$KCADM" config credentials \
   exit 1
 fi
 
-if ! "$KCADM" get "realms/$REALM" >/dev/null 2>&1; then
-  "$KCADM" create realms -s "realm=$REALM" -s enabled=true
+if ! "${KCADM[@]}" get "realms/$REALM" >/dev/null 2>&1; then
+  "${KCADM[@]}" create realms -s "realm=$REALM" -s enabled=true
 fi
 
 ALL_AUDIENCES="order-api inventory-api supplier-simulator event-collector outbox-dispatcher"
@@ -27,7 +39,8 @@ ensure_scope() {
   local scope_file json_file scopes_json scope_id line
 
   scope_file="${scope//:/_}"
-  json_file="/tmp/keycloak-scope-${scope_file}-$$.json"
+  json_file="/tmp/keycloak-scope-${scope_file}-$.json"
+  TEMP_FILES+=("$json_file")
   {
     printf '{\n'
     printf '  "name": "%s",\n' "$scope"
@@ -39,7 +52,7 @@ ensure_scope() {
     printf '}\n'
   } > "$json_file"
 
-  scopes_json="$("$KCADM" get client-scopes -r "$REALM" 2>/dev/null || true)"
+  scopes_json="$("${KCADM[@]}" get client-scopes -r "$REALM" 2>/dev/null || true)"
   scope_id=""
   current_id=""
   current_name=""
@@ -61,11 +74,11 @@ ensure_scope() {
   done <<< "$scopes_json"
 
   if [[ -n "$scope_id" ]]; then
-    if ! "$KCADM" update "client-scopes/$scope_id" -r "$REALM" -f "$json_file"; then
+    if ! "${KCADM[@]}" update "client-scopes/$scope_id" -r "$REALM" -f "$json_file"; then
       return 1
     fi
   else
-    if ! "$KCADM" create client-scopes -r "$REALM" -f "$json_file"; then
+    if ! "${KCADM[@]}" create client-scopes -r "$REALM" -f "$json_file"; then
       return 1
     fi
   fi
@@ -78,7 +91,8 @@ ensure_client() {
   local audiences="$4"
   local json_file client_uuid clients_json line
 
-  json_file="/tmp/keycloak-client-${client}-$$.json"
+  json_file="/tmp/keycloak-client-${client}-$.json"
+  TEMP_FILES+=("$json_file")
   {
     printf '{\n'
     printf '  "clientId": "%s",\n' "$client"
@@ -111,7 +125,7 @@ ensure_client() {
     printf '}\n'
   } > "$json_file"
 
-  clients_json="$("$KCADM" get clients -r "$REALM" -q "clientId=$client" 2>/dev/null || true)"
+  clients_json="$("${KCADM[@]}" get clients -r "$REALM" -q "clientId=$client" 2>/dev/null || true)"
   client_uuid=""
   while IFS= read -r line; do
     if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
@@ -121,11 +135,11 @@ ensure_client() {
   done <<< "$clients_json"
 
   if [[ -n "$client_uuid" ]]; then
-    if ! "$KCADM" update "clients/$client_uuid" -r "$REALM" -f "$json_file"; then
+    if ! "${KCADM[@]}" update "clients/$client_uuid" -r "$REALM" -f "$json_file"; then
       return 1
     fi
   else
-    if ! "$KCADM" create clients -r "$REALM" -f "$json_file"; then
+    if ! "${KCADM[@]}" create clients -r "$REALM" -f "$json_file"; then
       return 1
     fi
   fi
