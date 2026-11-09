@@ -188,7 +188,7 @@ ensure_browser_client() {
       done
     done
     printf '\n  ],\n'
-    printf '  "defaultOptionalClientScopes": ['
+    printf '  "optionalClientScopes": ['
     local first=1 scope
     for scope in $ALL_SCOPES; do
       if (( first )); then first=0; else printf ', '; fi
