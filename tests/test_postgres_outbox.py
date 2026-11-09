@@ -221,9 +221,9 @@ async def test_inventory_triggers_emit_correlated_events_once(
             assert event.event_id == row["event_id"]
             assert event.correlation_id == correlation_id
             assert event.source["message"] == event.event_name
-        assert relevant[1]["event_payload"]["attributes"]["receipt_id"] == (
-            first["receipt_id"]
-        )
+        receipt_attributes = relevant[1]["event_payload"]["attributes"]
+        assert receipt_attributes["idempotency_key"] == request.idempotency_key
+        assert receipt_attributes["reference"] == request.reference
     finally:
         correlation_id_context.reset(token)
         await database.close()
