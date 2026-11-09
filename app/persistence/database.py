@@ -92,7 +92,7 @@ class DatabaseManager:
     @asynccontextmanager
     async def _bound_transaction(
         self, connection: AsyncConnection
-    ) -> AbstractAsyncContextManager[AsyncConnection]:
+    ) -> AsyncIterator[AsyncConnection]:
         """Run one repository operation on the currently bound session."""
         async with connection.transaction():
             yield connection
