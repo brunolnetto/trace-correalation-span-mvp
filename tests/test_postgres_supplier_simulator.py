@@ -276,7 +276,7 @@ async def test_supplier_state_survives_process_restarts_and_receipt_response_los
                     "product_id": product_id,
                     "reorder_point": 0,
                     "target_stock": 10,
-                    "lead_time_seconds": 0,
+                    "lead_time_seconds": 60,
                 },
             )
             assert policy.status_code == 200
@@ -330,6 +330,10 @@ async def test_supplier_state_survives_process_restarts_and_receipt_response_los
             )
             assert ordered.status_code == 200
             assert ordered.json()["status"] == "ordered"
+            clock_advance = await supplier_a.post(
+                "/clock/advance", json={"seconds": 60}
+            )
+            assert clock_advance.status_code == 200
 
             # Crash/restart before Inventory is called. The PO and its due time
             # must remain visible to a fresh Supplier Simulator process.
@@ -348,6 +352,28 @@ async def test_supplier_state_survives_process_restarts_and_receipt_response_los
                 )
                 assert persisted.status_code == 200
                 assert persisted.json()["status"] == "ordered"
+                assert persisted.json()["lines"][0]["quantity"] == 10
+                assert persisted.json()["lines"][0]["sku"] == "COFFEE-BEANS-250G"
+
+                onboarding_after_restart = await restarted_supplier.post(
+                    "/supplier-catalog/BEANS-250/onboard"
+                )
+                assert onboarding_after_restart.status_code == 200
+                assert (
+                    onboarding_after_restart.json()["product"]["product_id"]
+                    == product_id
+                )
+                persisted_policies = await restarted_supplier.get("/reorder-policies")
+                assert persisted_policies.status_code == 200
+                persisted_policy = persisted_policies.json()[0]
+                assert persisted_policy["version"] == 2
+                assert persisted_policy["target_stock"] == 10
+
+                persisted_clock = await restarted_supplier.get("/clock")
+                assert persisted_clock.status_code == 200
+                first_due_at = persisted.json()["due_at"]
+                assert first_due_at <= persisted_clock.json()["now"]
+
                 first_receipt = await restarted_supplier.post(
                     f"/purchase-orders/{first_po_id}/receive"
                 )
