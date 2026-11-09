@@ -360,6 +360,10 @@ class OutboxDispatcher:
             return await self._record_failure(
                 claim, exc, retryable=True
             )
+        except RuntimeError as exc:
+            return await self._record_failure(
+                claim, exc, retryable=True
+            )
 
         acknowledged = await self.repository.mark_delivered(
             outbox_id=outbox_id,
