@@ -12,6 +12,7 @@ from sagaz import Saga, SagaConfig, action, compensate
 from sagaz.core.listeners import SagaListener
 
 from app.persistence.ports import OrderRepository
+from app.security import service_authorization_headers
 
 INVENTORY_API_URL = os.getenv("INVENTORY_API_URL", "http://localhost:8001")
 PAYMENT_DECLINE_ABOVE = float(os.getenv("PAYMENT_DECLINE_ABOVE", "1000"))
@@ -202,6 +203,8 @@ class OrderProcessingSaga(Saga):
     @action("reserve_inventory", timeout_seconds=10, max_retries=0)
     async def reserve_inventory(self, ctx: dict[str, Any]) -> dict[str, Any]:
         async with create_inventory_client() as client:
+            headers = await service_authorization_headers("inventory:reserve")
+            headers["X-Correlation-ID"] = ctx["correlation_id"]
             response = await client.post(
                 f"/inventory/{ctx['product_id']}/reservations",
                 json={
@@ -221,9 +224,11 @@ class OrderProcessingSaga(Saga):
             return
 
         async with create_inventory_client() as client:
+            headers = await service_authorization_headers("inventory:reserve")
+            headers["X-Correlation-ID"] = ctx["correlation_id"]
             response = await client.delete(
                 f"/inventory/reservations/{reservation_id}",
-                headers={"X-Correlation-ID": ctx["correlation_id"]},
+                headers=headers,
             )
             response.raise_for_status()
 
