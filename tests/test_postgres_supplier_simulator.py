@@ -304,6 +304,27 @@ async def test_supplier_state_survives_process_restarts_and_receipt_response_los
             assert len(purchase_order_ids) == 1
             first_po_id = next(iter(purchase_order_ids))
 
+            # Bypass the application lock and prove the partial unique index
+            # itself rejects a second active PO for the same product.
+            with psycopg.connect(isolated_postgres_schema) as connection:
+                with pytest.raises(psycopg.errors.UniqueViolation):
+                    connection.execute(
+                        """
+                        INSERT INTO supplier_purchase_orders (
+                            purchase_order_id, product_id, supplier_sku,
+                            policy_version, reorder_point, target_stock,
+                            inventory_position_at_order, on_hand_at_order,
+                            reserved_at_order, on_order_at_order, quantity,
+                            lead_time_seconds, status, created_at
+                        )
+                        VALUES (
+                            %s, %s, 'BEANS-250', 1, 0, 10,
+                            0, 0, 0, 0, 1, 0, 'created', now()
+                        )
+                        """,
+                        (uuid4(), product_id),
+                    )
+
             ordered = await supplier_a.post(
                 f"/purchase-orders/{first_po_id}/order"
             )
