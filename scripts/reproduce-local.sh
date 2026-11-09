@@ -23,6 +23,7 @@ ORDER_API_HOST_PORT="${ORDER_API_HOST_PORT:-18000}"
 INVENTORY_API_HOST_PORT="${INVENTORY_API_HOST_PORT:-18001}"
 SUPPLIER_HOST_PORT="${SUPPLIER_HOST_PORT:-18002}"
 EVENT_COLLECTOR_HOST_PORT="${EVENT_COLLECTOR_HOST_PORT:-18003}"
+KEYCLOAK_HOST_PORT="${KEYCLOAK_HOST_PORT:-18080}"
 JAEGER_UI_HOST_PORT="${JAEGER_UI_HOST_PORT:-16686}"
 GRAFANA_HOST_PORT="${GRAFANA_HOST_PORT:-13000}"
 LOKI_HOST_PORT="${LOKI_HOST_PORT:-13100}"
@@ -30,7 +31,7 @@ OTLP_GRPC_HOST_PORT="${OTLP_GRPC_HOST_PORT:-4317}"
 OTLP_HTTP_HOST_PORT="${OTLP_HTTP_HOST_PORT:-4318}"
 OTEL_HEALTH_HOST_PORT="${OTEL_HEALTH_HOST_PORT:-13133}"
 export ORDER_API_HOST_PORT INVENTORY_API_HOST_PORT SUPPLIER_HOST_PORT
-export EVENT_COLLECTOR_HOST_PORT JAEGER_UI_HOST_PORT GRAFANA_HOST_PORT LOKI_HOST_PORT
+export EVENT_COLLECTOR_HOST_PORT KEYCLOAK_HOST_PORT JAEGER_UI_HOST_PORT GRAFANA_HOST_PORT LOKI_HOST_PORT
 export OTLP_GRPC_HOST_PORT OTLP_HTTP_HOST_PORT OTEL_HEALTH_HOST_PORT
 ORDER_URL="${ORDER_URL:-http://127.0.0.1:${ORDER_API_HOST_PORT}}"
 INVENTORY_URL="${INVENTORY_URL:-http://127.0.0.1:${INVENTORY_API_HOST_PORT}}"
@@ -59,6 +60,21 @@ require_command docker
 require_command curl
 require_command python3
 require_command uv
+
+# Local-only Keycloak/client credentials are generated outside source control.
+bash scripts/prepare-dev-env.sh
+set -a
+# shellcheck disable=SC1091
+source .env
+set +a
+
+KEYCLOAK_URL="http://127.0.0.1:${KEYCLOAK_HOST_PORT}"
+DEV_ACCESS_TOKEN=""
+api_curl() {
+  [[ -n "$DEV_ACCESS_TOKEN" ]] || die "Local developer access token is not initialized"
+  curl --header "Authorization: Bearer $DEV_ACCESS_TOKEN" "$@"
+}
+
 mapfile -t REPRO_CORRELATION_IDS < <(
   python3 - <<'PY'
 import uuid
@@ -142,6 +158,7 @@ wait_for_internal_service() {
 echo "    waiting for service health endpoints (up to ${WAIT_SECONDS}s)"
 wait_for_url "$INVENTORY_URL/healthz" "inventory-api"
 wait_for_url "$ORDER_URL/healthz" "order-api"
+wait_for_url "$KEYCLOAK_URL/realms/trace-local/.well-known/openid-configuration" "Keycloak OIDC realm"
 wait_for_url "$JAEGER_URL/" "Jaeger UI"
 wait_for_url "$LOKI_URL/ready" "Loki"
 wait_for_url "$GRAFANA_URL/api/health" "Grafana"
@@ -150,8 +167,28 @@ wait_for_url "$EVENT_COLLECTOR_URL/healthz" "event-collector"
 wait_for_url "$SUPPLIER_URL/healthz" "supplier-simulator"
 wait_for_internal_service "outbox-dispatcher" "http://127.0.0.1:8011/healthz"
 
+echo "    acquiring local developer access token from Keycloak"
+curl --ipv4 --silent --show-error --fail \
+  --user "local-developer:$LOCAL_DEVELOPER_CLIENT_SECRET" \
+  --data-urlencode "grant_type=client_credentials" \
+  --data-urlencode "scope=catalog:read catalog:write orders:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive inventory:adjust suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest events:read operations:read" \
+  "$KEYCLOAK_URL/realms/trace-local/protocol/openid-connect/token" \
+  > "$TMP_DIR/developer-token.json"
+DEV_ACCESS_TOKEN="$(python3 - "$TMP_DIR/developer-token.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+token = payload.get("access_token")
+if not isinstance(token, str) or not token:
+    raise SystemExit("Keycloak did not return an access token")
+print(token)
+PY
+)"
+
 echo "==> 5/7: Exercise catalog, orders, and supplier replenishment"
-curl --silent --show-error --fail \
+api_curl --silent --show-error --fail \
   --header "Content-Type: application/json" \
   --data '{"sku":"LOW-STOCK-001","name":"Low stock demo product","category":"demo","unit_price":"10.00"}' \
   "$INVENTORY_URL/products" > "$TMP_DIR/product.json"
@@ -165,19 +202,19 @@ print(json.loads(Path(sys.argv[1]).read_text())["product_id"])
 PY
 )"
 
-curl --silent --show-error --fail \
+api_curl --silent --show-error --fail \
   --header "Content-Type: application/json" \
   --data '{"quantity":4,"idempotency_key":"demo-opening-receipt-001","reference":"DEMO-PO-001"}' \
   "$INVENTORY_URL/inventory/$LOW_STOCK_PRODUCT_ID/receipts" \
   > "$TMP_DIR/receipt.json"
 
-curl --silent --show-error --fail \
+api_curl --silent --show-error --fail \
   --dump-header "$TMP_DIR/read.headers" \
   --output "$TMP_DIR/read.json" \
   --header "X-Correlation-ID: $READ_CORRELATION_ID" \
   "$ORDER_URL/orders/7"
 
-PROCESS_STATUS="$(curl --silent --show-error \
+PROCESS_STATUS="$(api_curl --silent --show-error \
   --dump-header "$TMP_DIR/process.headers" \
   --output "$TMP_DIR/process.json" \
   --write-out '%{http_code}' \
@@ -190,7 +227,7 @@ PROCESS_STATUS="$(curl --silent --show-error \
   die "Expected successful order workflow to return 201, got $PROCESS_STATUS"
 }
 
-DECLINE_STATUS="$(curl --silent --show-error \
+DECLINE_STATUS="$(api_curl --silent --show-error \
   --dump-header "$TMP_DIR/decline.headers" \
   --output "$TMP_DIR/decline.json" \
   --write-out '%{http_code}' \
@@ -203,7 +240,7 @@ DECLINE_STATUS="$(curl --silent --show-error \
   die "Expected payment decline with compensation to return 402, got $DECLINE_STATUS"
 }
 
-INSUFFICIENT_STATUS="$(curl --silent --show-error \
+INSUFFICIENT_STATUS="$(api_curl --silent --show-error \
   --dump-header "$TMP_DIR/insufficient.headers" \
   --output "$TMP_DIR/insufficient.json" \
   --write-out '%{http_code}' \
@@ -217,7 +254,7 @@ INSUFFICIENT_STATUS="$(curl --silent --show-error \
 }
 
 echo "    exercising supplier onboarding, replenishment, and receipt"
-curl --silent --show-error --fail \
+api_curl --silent --show-error --fail \
   --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
   --output "$TMP_DIR/supplier-onboard.json" \
   --request POST "$SUPPLIER_URL/supplier-catalog/BEANS-250/onboard"
@@ -231,7 +268,7 @@ print(json.loads(Path(sys.argv[1]).read_text())["product"]["product_id"])
 PY
 )"
 
-curl --silent --show-error --fail \
+api_curl --silent --show-error --fail \
   --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
   --request POST \
   "$SUPPLIER_URL/replenishments/evaluate?product_id=$SUPPLIER_PRODUCT_ID" \
@@ -248,31 +285,31 @@ print(decision["purchase_order"]["purchase_order_id"])
 PY
 )"
 
-curl --silent --show-error --fail \
+api_curl --silent --show-error --fail \
   --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
   --request POST \
   "$SUPPLIER_URL/purchase-orders/$PURCHASE_ORDER_ID/order" \
   > "$TMP_DIR/supplier-ordered.json"
 
-curl --silent --show-error --fail \
+api_curl --silent --show-error --fail \
   --header "Content-Type: application/json" \
   --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
   --data '{"seconds":3600}' \
   "$SUPPLIER_URL/clock/advance" > "$TMP_DIR/supplier-clock.json"
 
-curl --silent --show-error --fail \
+api_curl --silent --show-error --fail \
   --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
   --request POST \
   "$SUPPLIER_URL/purchase-orders/$PURCHASE_ORDER_ID/receive" \
   > "$TMP_DIR/supplier-received.json"
 
-curl --silent --show-error --fail \
+api_curl --silent --show-error --fail \
   --header "X-Correlation-ID: $SUPPLIER_CORRELATION_ID" \
   --request POST \
   "$SUPPLIER_URL/replenishments/evaluate?product_id=$SUPPLIER_PRODUCT_ID" \
   > "$TMP_DIR/supplier-recheck.json"
 
-curl --silent --show-error --fail \
+api_curl --silent --show-error --fail \
   --output "$TMP_DIR/supplier-inventory.json" \
   "$INVENTORY_URL/inventory/$SUPPLIER_PRODUCT_ID"
 
@@ -303,8 +340,8 @@ print("    supplier purchase order received 48 units exactly once")
 print("    inventory position above reorder point; no second PO created")
 PY
 
-curl --silent --show-error --fail --output "$TMP_DIR/inventory.json" "$INVENTORY_URL/inventory/7"
-curl --silent --show-error --fail --output "$TMP_DIR/low-stock.json" \
+api_curl --silent --show-error --fail --output "$TMP_DIR/inventory.json" "$INVENTORY_URL/inventory/7"
+api_curl --silent --show-error --fail --output "$TMP_DIR/low-stock.json" \
   "$INVENTORY_URL/inventory/$LOW_STOCK_PRODUCT_ID"
 
 python3 - "$TMP_DIR/process.headers" "$TMP_DIR/process.json" \
@@ -556,7 +593,7 @@ echo
 deadline=$((SECONDS + WAIT_SECONDS))
 COLLECTED=0
 while (( SECONDS < deadline )); do
-  if curl --silent --show-error --fail \
+  if api_curl --silent --show-error --fail \
     "$EVENT_COLLECTOR_URL/v1/events?limit=10000" \
     -o "$TMP_DIR/collected-events.json"; then
     if python3 - "$TMP_DIR/collected-events.json" \
@@ -675,7 +712,7 @@ PY
 done
 
 if (( ! COLLECTED )); then
-  curl --silent --show-error "$EVENT_COLLECTOR_URL/v1/stats" >&2 || true
+  api_curl --silent --show-error "$EVENT_COLLECTOR_URL/v1/stats" >&2 || true
   die "Raw event collector did not persist all expected scenario events"
 fi
 
