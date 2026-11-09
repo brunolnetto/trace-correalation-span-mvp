@@ -15,7 +15,12 @@ from app.order.durable import (
     PostgresOrderSagaRepository,
     PostgresPaymentGateway,
 )
-from app.order.workflow import PaymentDeclined
+from app.order.workflow import (
+    PaymentDeclined,
+    configure_order_repository,
+    persist_order,
+)
+from app.order.repository import PostgresOrderRepository
 from app.persistence.config import DatabaseSettings
 from app.persistence.database import DatabaseManager
 from app.persistence.migrations import MIGRATIONS_DIR, apply_migrations
@@ -418,5 +423,102 @@ async def test_inventory_commit_before_checkpoint_is_replayed_with_same_key(
         assert reserve_step["forward_attempts"] == 2
         assert reserve_step["forward_status"] == "completed"
     finally:
+        await restarted_database.close()
+
+class OrderConfirmationResponseLostSaga:
+    """Simulates an order upsert commit followed by a lost step response."""
+
+    def __init__(self, *, lose_response: bool) -> None:
+        self.lose_response = lose_response
+
+    async def reserve_inventory(self, context: dict) -> dict:
+        return {}
+
+    async def charge_payment(self, context: dict) -> dict:
+        return {"payment_id": "payment-confirmation-test"}
+
+    async def confirm_order(self, context: dict) -> dict:
+        result = await persist_order(context)
+        if self.lose_response:
+            self.lose_response = False
+            raise RuntimeError("simulated process loss after order commit")
+        return result
+
+    async def release_inventory(self, context: dict) -> None:
+        return None
+
+    async def refund_payment(self, context: dict) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_order_confirmation_commit_before_checkpoint_is_idempotent(
+    isolated_postgres_schema,
+):
+    database_url, product_id = isolated_postgres_schema
+    order_id = 910005
+    context = _context(order_id, product_id)
+
+    database = await _open_database(database_url)
+    configure_order_repository(PostgresOrderRepository(database))
+    repository = PostgresOrderSagaRepository(database)
+    gateway = PostgresPaymentGateway(database)
+    record = await repository.start_or_load(context)
+
+    try:
+        with pytest.raises(RuntimeError, match="after order commit"):
+            await DurableOrderExecutor(repository, gateway).execute(
+                OrderConfirmationResponseLostSaga(lose_response=True),
+                tracker=None,
+                record=record,
+            )
+    finally:
+        await database.close()
+
+    restarted_database = await _open_database(database_url)
+    configure_order_repository(PostgresOrderRepository(restarted_database))
+    try:
+        restarted_repository = PostgresOrderSagaRepository(
+            restarted_database
+        )
+        restarted_gateway = PostgresPaymentGateway(restarted_database)
+        pending = await restarted_repository.get_by_order(order_id)
+        assert pending is not None
+        confirm_step = next(
+            step for step in pending["steps"]
+            if step["step_name"] == "confirm_order"
+        )
+        assert confirm_step["forward_status"] == "running"
+
+        result = await DurableOrderExecutor(
+            restarted_repository, restarted_gateway
+        ).execute(
+            OrderConfirmationResponseLostSaga(lose_response=False),
+            tracker=None,
+            record=pending,
+        )
+        assert result["order_status"] == "processed"
+
+        async with restarted_database.connection() as connection:
+            cursor = await connection.execute(
+                "SELECT count(*) AS count, max(status) AS status "
+                "FROM orders WHERE order_id = %s",
+                (order_id,),
+            )
+            order = await cursor.fetchone()
+            assert order["count"] == 1
+            assert order["status"] == "processed"
+
+        completed = await restarted_repository.get(context["saga_id"])
+        assert completed is not None
+        assert completed["status"] == "completed"
+        confirm_step = next(
+            step for step in completed["steps"]
+            if step["step_name"] == "confirm_order"
+        )
+        assert confirm_step["forward_attempts"] == 2
+        assert confirm_step["forward_status"] == "completed"
+    finally:
+        configure_order_repository(None)
         await restarted_database.close()
 
