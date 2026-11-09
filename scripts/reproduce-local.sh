@@ -444,7 +444,7 @@ echo "    Jaeger contains declined-order trace $DECLINE_TRACE_ID with cross-serv
 
 # Search Loki by the same business correlation ID used to find the trace.
 # Correlation ID is structured metadata, not an indexed label.
-LOKI_QUERY="{service_name=\\\"order-api\\\"} | correlation_id=\\\"$DECLINE_CORRELATION_ID\\\""
+LOKI_QUERY='{service_name="order-api"} | correlation_id="'"$DECLINE_CORRELATION_ID"'"'
 LOKI_FOUND=0
 deadline=$((SECONDS + WAIT_SECONDS))
 while (( SECONDS < deadline )); do
