@@ -170,7 +170,7 @@ async def test_proxy_preserves_method_query_body_and_correlation_context():
         )
 
     assert response.status_code == 201
-    assert response.headers["x-gateway-route"] == "order-api"
+    assert response.headers["x-gateway-route"] == "orders"
     assert response.headers["x-gateway-policy-revision"] == "1"
     assert response.headers["x-correlation-id"] == "550e8400-e29b-41d4-a716-446655440011"
     assert response.headers["x-upstream"] == "order-api"
