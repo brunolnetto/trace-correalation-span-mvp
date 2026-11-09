@@ -3,10 +3,10 @@ set -Eeuo pipefail
 umask 077
 
 KCADM_CONFIG="/tmp/keycloak-admin-$BASHPID.config"
-KCADM=(/opt/keycloak/bin/kcadm.sh --config ""${KCADM[@]}"_CONFIG")
+KCADM=(/opt/keycloak/bin/kcadm.sh --config "$KCADM_CONFIG")
 REALM="trace-local"
 SERVER="http://keycloak:8080"
-TEMP_FILES=(""${KCADM[@]}"_CONFIG")
+TEMP_FILES=("$KCADM_CONFIG")
 
 cleanup_sensitive_files() {
   local file
@@ -151,16 +151,16 @@ done
 
 # First create every client without audience references. Audience mapper client IDs
 # must already exist in the realm before the second pass configures those mappers.
-ensure_client order-api "$ORDER_API_CLIENT_SECRET" \\
+ensure_client order-api "$ORDER_API_CLIENT_SECRET" \
   "catalog:read inventory:read inventory:reserve inventory:fulfill events:ingest" ""
 ensure_client inventory-api "$INVENTORY_API_CLIENT_SECRET" "events:ingest" ""
-ensure_client supplier-simulator "$SUPPLIER_SIMULATOR_CLIENT_SECRET" \\
+ensure_client supplier-simulator "$SUPPLIER_SIMULATOR_CLIENT_SECRET" \
   "catalog:read catalog:write inventory:read inventory:receive events:ingest" ""
 ensure_client event-collector "$EVENT_COLLECTOR_CLIENT_SECRET" "events:ingest" ""
 ensure_client outbox-dispatcher "$OUTBOX_DISPATCHER_CLIENT_SECRET" "events:ingest" ""
-ensure_client order-generator "$ORDER_GENERATOR_CLIENT_SECRET" \\
+ensure_client order-generator "$ORDER_GENERATOR_CLIENT_SECRET" \
   "orders:process events:ingest" ""
-ensure_client standalone-runner "$STANDALONE_RUNNER_CLIENT_SECRET" \\
+ensure_client standalone-runner "$STANDALONE_RUNNER_CLIENT_SECRET" \
   "catalog:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest events:read" ""
 ensure_client local-developer "$LOCAL_DEVELOPER_CLIENT_SECRET" "$ALL_SCOPES" ""
 
