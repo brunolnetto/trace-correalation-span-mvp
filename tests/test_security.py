@@ -424,3 +424,28 @@ def test_openapi_declares_scopes_for_each_api_boundary():
 
     for schema in (order_schema, supplier_schema, event_schema, outbox_schema):
         assert "security" not in schema["paths"]["/healthz"]["get"]
+
+
+@pytest.mark.asyncio
+async def test_inventory_route_rejects_malformed_bearer_token(
+    oidc_environment, monkeypatch
+):
+    import httpx
+
+    from app.inventory.main import app as inventory_app
+
+    async def fake_introspection(token, settings):
+        assert token == "not-a-jwt"
+        return {"active": False}
+
+    monkeypatch.setattr(security, "_request_introspection", fake_introspection)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=inventory_app),
+        base_url="http://inventory.test",
+    ) as client:
+        response = await client.get(
+            "/products",
+            headers={"Authorization": "Bearer not-a-jwt"},
+        )
+
+    assert response.status_code == 401
