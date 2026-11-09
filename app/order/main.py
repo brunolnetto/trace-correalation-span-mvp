@@ -140,6 +140,15 @@ async def get_order(order_id: int):
             status_code=503,
             detail="Inventory service is temporarily unavailable",
         ) from None
+    except RuntimeError:
+        logger.exception(
+            "order.inventory_authentication.failed",
+            extra={"order_id": order_id},
+        )
+        raise HTTPException(
+            status_code=503,
+            detail="Inventory service authentication is temporarily unavailable",
+        ) from None
 
     logger.info("order.lookup.completed", extra={"order_id": order_id})
     return {
@@ -270,6 +279,18 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
             raise HTTPException(
                 status_code=503,
                 detail="Product catalog is temporarily unavailable.",
+            ) from None
+        except RuntimeError:
+            logger.exception(
+                "order.process.catalog_authentication.failed",
+                extra={
+                    "order_id": order_id,
+                    "product_id": request.product_id,
+                },
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Product catalog authentication is temporarily unavailable.",
             ) from None
 
         unit_price = Decimal(str(product["unit_price"])).quantize(
