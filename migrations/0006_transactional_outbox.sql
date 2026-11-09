@@ -292,11 +292,18 @@ CREATE TRIGGER supplier_onboarding_outbox_insert
 CREATE OR REPLACE FUNCTION outbox_supplier_policy_change()
 RETURNS TRIGGER
 LANGUAGE plpgsql
-AS $$
+AS $
+DECLARE
+    v_event_name TEXT;
 BEGIN
+    v_event_name := CASE TG_OP
+        WHEN 'INSERT' THEN 'supplier.reorder_policy.created'
+        ELSE 'supplier.reorder_policy.updated'
+    END;
+
     PERFORM enqueue_outbox_event(
         'supplier-simulator',
-        'supplier.reorder_policy.updated',
+        v_event_name,
         'supplier_reorder_policy',
         NEW.product_id::TEXT,
         jsonb_build_object(
