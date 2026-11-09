@@ -212,7 +212,7 @@ class OrderProcessingSaga(Saga):
                     "saga_id": ctx["saga_id"],
                     "quantity": ctx["quantity"],
                 },
-                headers={"X-Correlation-ID": ctx["correlation_id"]},
+                headers=headers,
             )
             response.raise_for_status()
         return response.json()
