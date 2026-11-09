@@ -4,7 +4,7 @@ Issue: [#27](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/2
 
 ## Decision
 
-Use standard OpenID Connect access tokens and OAuth 2.0 client credentials. Do not introduce an application-specific token format or use a shared development bypass in Compose.
+Use standard OpenID Connect access tokens and OAuth 2.0 client credentials. Human browser sessions use Authorization Code with PKCE (S256); machine identities use Client Credentials. Do not introduce an application-specific token format or use a shared development bypass in Compose.
 
 - **Local identity provider:** Keycloak in the development Compose stack, with a dedicated development realm.
 - **Non-local deployments:** Any standards-compliant OIDC provider may be configured through issuer, JWKS, audience, and token-endpoint settings. The application must not depend on Keycloak-specific claims.
@@ -85,7 +85,7 @@ The initial machine identities are:
 
 The caller obtains a token for its own identity, requests only the scopes required by the downstream operation, caches it only until shortly before expiry, and sends it as a Bearer token. Each downstream API independently validates the token and its scopes. Its audience must identify the receiving API; the local Keycloak configuration does not attach every API audience to every service token. The identity provider, not an inbound `X-Service-Name` header, establishes the caller identity.
 
-The local Keycloak 26.6.2 realm models each permission as an optional OIDC client scope with `include.in.token.scope=true`. Keycloak 26.6.2 also validates that the authenticated introspection client is included in the token's audience, so each service token receives only the API audiences it is intended to call. Each service client is linked only to its allowed scope names. The caller requests the exact subset for an operation via the standard OAuth `scope` parameter. Keycloak adds only those requested, client-permitted scopes to the access token and introspection response. Audience mappers are similarly limited to the receiving APIs each caller needs:
+The local Keycloak 26.8.2 realm models each permission as an optional OIDC client scope with `include.in.token.scope=true`. Keycloak 26.8.2 also validates that the authenticated introspection client is included in the token's audience, so each service token receives only the API audiences it is intended to call. Each service client is linked only to its allowed scope names. The caller requests the exact subset for an operation via the standard OAuth `scope` parameter. Keycloak adds only those requested, client-permitted scopes to the access token and introspection response. Audience mappers are similarly limited to the receiving APIs each caller needs:
 
 | Client | Downstream audiences |
 |---|---|
@@ -126,7 +126,7 @@ Tests must cover:
 7. Local Compose user and service flows against the development OIDC realm.
 8. OpenAPI security declarations and minimal public health responses.
 
-The local reproduction acquires a broad, development-only `local-developer` client-credentials token before calling protected APIs. This is a local operator identity, not a human user login. Non-local human clients should use the provider's Authorization Code flow; internal service-to-service calls must use independent client-credentials identities.
+The local reproduction acquires a broad, development-only `local-developer` client-credentials token before calling protected APIs. This is a local operator identity, not a human user login. The separate public `local-web` client uses Authorization Code with PKCE (S256), has no client secret, and is paired with the `local-user` development account whose generated password is stored only in the ignored `.env` file. The local user and browser client are not production identities. Non-local human clients should use the provider's Authorization Code flow; internal service-to-service calls must use independent client-credentials identities.
 
 ## Non-goals
 
