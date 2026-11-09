@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-ROOT_DIR="$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env"
 touch "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
 ensure_secret() {
   local name="$1"
-  if ! grep -q "^\${name}=" "$ENV_FILE"; then
+  if ! grep -q "^${name}=" "$ENV_FILE"; then
     local value
     value="$(python3 -c 'import secrets; print(secrets.token_urlsafe(36))')"
     printf '%s=%s\n' "$name" "$value" >> "$ENV_FILE"
