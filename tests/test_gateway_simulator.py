@@ -8,7 +8,7 @@ from importlib import import_module
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from opentelemetry import trace
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
@@ -578,7 +578,7 @@ async def test_gateway_and_downstream_share_w3c_trace_and_correlated_logs():
     downstream = FastAPI()
 
     @downstream.get("/orders/probe")
-    async def downstream_probe(request):
+    async def downstream_probe(request: Request):
         captured["traceparent"] = request.headers.get("traceparent")
         captured["tracestate"] = request.headers.get("tracestate")
         captured["correlation_id"] = observability.correlation_id_context.get()
@@ -605,7 +605,7 @@ async def test_gateway_and_downstream_share_w3c_trace_and_correlated_logs():
         trace_id=int("4bf92f3577b34da6a3ce929d0e0e4736", 16),
         span_id=int("00f067aa0ba902b7", 16),
         is_remote=True,
-        trace_flags=TraceFlags.SAMPLED,
+        trace_flags=TraceFlags(TraceFlags.SAMPLED),
         trace_state=TraceState([("vendor", "value")]),
     )
     log_stream = io.StringIO()
