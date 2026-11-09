@@ -36,8 +36,8 @@ ensure_scope() {
   local scope="$1"
   local scope_file json_file scopes_json scope_id line
 
-  scope_file="\${scope//:/_}"
-  json_file="/tmp/keycloak-scope-\${scope_file}-$$.json"
+  scope_file="${scope//:/_}"
+  json_file="/tmp/keycloak-scope-${scope_file}-$$.json"
   {
     printf '{\n'
     printf '  "name": "%s",\n' "$scope"
@@ -53,7 +53,7 @@ ensure_scope() {
   scope_id=""
   while IFS= read -r line; do
     if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
-      scope_id="\${BASH_REMATCH[1]}"
+      scope_id="${BASH_REMATCH[1]}"
       break
     fi
   done <<< "$scopes_json"
@@ -79,7 +79,7 @@ ensure_client() {
   local audiences="$4"
   local json_file client_uuid clients_json line
 
-  json_file="/tmp/keycloak-client-\${client}-$$.json"
+  json_file="/tmp/keycloak-client-${client}-$$.json"
   {
     printf '{\n'
     printf '  "clientId": "%s",\n' "$client"
@@ -116,7 +116,7 @@ ensure_client() {
   client_uuid=""
   while IFS= read -r line; do
     if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
-      client_uuid="\${BASH_REMATCH[1]}"
+      client_uuid="${BASH_REMATCH[1]}"
       break
     fi
   done <<< "$clients_json"
