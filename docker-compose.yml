@@ -53,6 +53,8 @@ services:
       ORDER_GENERATOR_CLIENT_SECRET: ${ORDER_GENERATOR_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
       STANDALONE_RUNNER_CLIENT_SECRET: ${STANDALONE_RUNNER_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
       LOCAL_DEVELOPER_CLIENT_SECRET: ${LOCAL_DEVELOPER_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+      LOCAL_DEVELOPER_PASSWORD: ${LOCAL_DEVELOPER_PASSWORD:?Run scripts/prepare-dev-env.sh before starting Compose}
+      LOCAL_DEVELOPER_USERNAME: ${LOCAL_DEVELOPER_USERNAME:-local-user}
     volumes:
       - ./docker/keycloak-configure.sh:/opt/keycloak/bootstrap/configure.sh:ro
     depends_on:
