@@ -46,7 +46,7 @@ class PostgresSupplierSimulation:
         async with self.database.connection() as connection:
             await connection.execute(
                 """
-                INSERT INTO supplier_simulation_clock (singleton, current_time)
+                INSERT INTO supplier_simulation_clock (singleton, simulation_time)
                 VALUES (TRUE, now())
                 ON CONFLICT (singleton) DO NOTHING
                 """
@@ -77,7 +77,7 @@ class PostgresSupplierSimulation:
         async with self.database.connection() as connection:
             cursor = await connection.execute(
                 """
-                SELECT current_time
+                SELECT simulation_time
                 FROM supplier_simulation_clock
                 WHERE singleton = TRUE
                 """
@@ -85,7 +85,7 @@ class PostgresSupplierSimulation:
             row = await cursor.fetchone()
             if row is None:
                 raise RuntimeError("Supplier simulation clock is not initialized")
-            return {"now": _iso(row["current_time"])}
+            return {"now": _iso(row["simulation_time"])}
 
     async def advance_clock(self, seconds: int) -> dict[str, Any]:
         if seconds <= 0:
@@ -94,16 +94,16 @@ class PostgresSupplierSimulation:
             cursor = await connection.execute(
                 """
                 UPDATE supplier_simulation_clock
-                SET current_time = current_time + (%s * interval '1 second')
+                SET simulation_time = simulation_time + (%s * interval '1 second')
                 WHERE singleton = TRUE
-                RETURNING current_time
+                RETURNING simulation_time
                 """,
                 (seconds,),
             )
             row = await cursor.fetchone()
             if row is None:
                 raise RuntimeError("Supplier simulation clock is not initialized")
-            return {"now": _iso(row["current_time"]), "advanced_seconds": seconds}
+            return {"now": _iso(row["simulation_time"]), "advanced_seconds": seconds}
 
     async def list_offerings(self) -> list[dict[str, Any]]:
         async with self.database.connection() as connection:
@@ -585,7 +585,7 @@ class PostgresSupplierSimulation:
 
         cursor = await connection.execute(
             """
-            SELECT current_time FROM supplier_simulation_clock
+            SELECT simulation_time FROM supplier_simulation_clock
             WHERE singleton = TRUE
             """
         )
@@ -621,7 +621,7 @@ class PostgresSupplierSimulation:
                 on_order,
                 quantity,
                 policy["lead_time_seconds"],
-                clock["current_time"],
+                clock["simulation_time"],
             ),
         )
         created = await cursor.fetchone()
@@ -715,14 +715,14 @@ class PostgresSupplierSimulation:
 
             cursor = await connection.execute(
                 """
-                SELECT current_time FROM supplier_simulation_clock
+                SELECT simulation_time FROM supplier_simulation_clock
                 WHERE singleton = TRUE
                 """
             )
             clock = await cursor.fetchone()
             if clock is None:
                 raise RuntimeError("Supplier simulation clock is not initialized")
-            ordered_at = clock["current_time"]
+            ordered_at = clock["simulation_time"]
             due_at = ordered_at + timedelta(seconds=order["lead_time_seconds"])
             await connection.execute(
                 """
@@ -773,14 +773,14 @@ class PostgresSupplierSimulation:
             if order["status"] == "ordered":
                 cursor = await connection.execute(
                     """
-                    SELECT current_time FROM supplier_simulation_clock
+                    SELECT simulation_time FROM supplier_simulation_clock
                     WHERE singleton = TRUE
                     """
                 )
                 clock = await cursor.fetchone()
                 if clock is None:
                     raise RuntimeError("Supplier simulation clock is not initialized")
-                if order["due_at"] is None or clock["current_time"] < order["due_at"]:
+                if order["due_at"] is None or clock["simulation_time"] < order["due_at"]:
                     raise ValueError("Supplier lead time has not elapsed")
                 await connection.execute(
                     """
@@ -788,7 +788,7 @@ class PostgresSupplierSimulation:
                     SET status = 'receiving', receiving_started_at = %s
                     WHERE purchase_order_id = %s
                     """,
-                    (clock["current_time"], identifier),
+                    (clock["simulation_time"], identifier),
                 )
                 await connection.execute(
                     """
@@ -856,7 +856,7 @@ class PostgresSupplierSimulation:
                 raise ValueError("Purchase order is not awaiting receipt completion")
             cursor = await connection.execute(
                 """
-                SELECT current_time FROM supplier_simulation_clock
+                SELECT simulation_time FROM supplier_simulation_clock
                 WHERE singleton = TRUE
                 """
             )
@@ -869,7 +869,7 @@ class PostgresSupplierSimulation:
                 SET status = 'received', received_at = %s, receipt_id = %s
                 WHERE purchase_order_id = %s
                 """,
-                (clock["current_time"], receipt_id, identifier),
+                (clock["simulation_time"], receipt_id, identifier),
             )
             await connection.execute(
                 """
@@ -938,7 +938,7 @@ class PostgresSupplierSimulation:
                 raise ValueError("Only created purchase orders can be cancelled")
             cursor = await connection.execute(
                 """
-                SELECT current_time FROM supplier_simulation_clock
+                SELECT simulation_time FROM supplier_simulation_clock
                 WHERE singleton = TRUE
                 """
             )
@@ -951,7 +951,7 @@ class PostgresSupplierSimulation:
                 SET status = 'cancelled', cancelled_at = %s
                 WHERE purchase_order_id = %s
                 """,
-                (clock["current_time"], identifier),
+                (clock["simulation_time"], identifier),
             )
             await connection.execute(
                 """
