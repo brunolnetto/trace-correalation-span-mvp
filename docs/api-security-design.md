@@ -66,6 +66,12 @@ Health/readiness endpoints remain unauthenticated only when they return a minima
 
 ## Service identities and trust boundaries
 
+The local development realm additionally provisions:
+
+- `local-web`: public browser client using Authorization Code with PKCE (S256), with redirect URIs restricted to the local FastAPI Swagger UI callbacks.
+- `local-user`: local-only user account used by Swagger UI. Its generated password is stored in the ignored `.env` file.
+- `local-developer`: confidential, broad development operator client used by the deterministic reproduction script. It is not a substitute for a human login.
+
 The initial machine identities are:
 
 | Caller | Downstream permission |
@@ -90,6 +96,7 @@ The local Keycloak 26.6.2 realm models each permission as an optional OIDC clien
 | `order-generator` | `order-api`, `event-collector` |
 | `standalone-runner` | `inventory-api`, `order-api`, `supplier-simulator`, `event-collector` |
 | `local-developer` | All local API audiences (development-only) |
+| `local-web` | All local API audiences for interactive Swagger UI calls (development-only) |
 
 The Event Collector is a separate trust boundary: ingestion is for machine identities; querying stored events and quarantine data requires an explicit read permission. The outbox dispatcher does not receive broader Event Collector read permissions.
 
