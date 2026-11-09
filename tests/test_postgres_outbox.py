@@ -5,6 +5,7 @@ import json
 import os
 from collections.abc import Iterator
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
@@ -15,7 +16,7 @@ import pytest
 from psycopg import sql
 from psycopg.types.json import Jsonb
 
-from app.event_collector.store import RawEvent
+from app.event_collector.store import JsonlEventStore, RawEvent
 from app.inventory.postgres_store import PostgresInventoryStore
 from app.inventory.store import InventoryReceiptRequest, ProductCreate
 from app.observability import correlation_id_context
@@ -415,34 +416,35 @@ async def test_multiple_dispatchers_claim_disjoint_batches_and_expired_leases_re
 @pytest.mark.asyncio
 async def test_collector_ack_lost_after_persist_is_safely_redelivered(
     outbox_database_url: str,
+    tmp_path: Path,
 ) -> None:
     database = await open_database(outbox_database_url)
     token = correlation_id_context.set(
         "550e8400-e29b-41d4-a716-446655440903"
     )
+    events_path = tmp_path / "events.jsonl"
+    quarantine_path = tmp_path / "quarantine.jsonl"
+    collector_store = JsonlEventStore(events_path, quarantine_path)
     try:
         repository = PostgresOutboxRepository(database)
         expected_id = await insert_outbox_event(database)
-        received_ids: set[str] = set()
         request_ids: list[str] = []
         request_correlations: list[str | None] = []
         event_correlations: list[str | None] = []
 
         def collector(request: httpx.Request) -> httpx.Response:
             payload = json.loads(request.content)
-            event = payload["events"][0]
-            event_id = event["event_id"]
-            request_ids.append(event_id)
+            event = RawEvent.model_validate(payload["events"][0])
+            request_ids.append(str(event.event_id))
             request_correlations.append(request.headers.get("x-correlation-id"))
-            event_correlations.append(event.get("correlation_id"))
-            duplicate = event_id in received_ids
-            received_ids.add(event_id)
+            event_correlations.append(event.correlation_id)
+            result = collector_store.append_batch([event])
             return httpx.Response(
                 202,
                 json={
-                    "accepted": 0 if duplicate else 1,
-                    "duplicates": 1 if duplicate else 0,
-                    "quarantined": 0,
+                    "accepted": result["accepted"],
+                    "duplicates": result["duplicates"],
+                    "quarantined": result["conflicts"],
                 },
             )
 
@@ -455,6 +457,7 @@ async def test_collector_ack_lost_after_persist_is_safely_redelivered(
             transport=httpx.MockTransport(collector),
             worker_id="worker-crash-window",
         )
+
         async def lose_database_ack(**_kwargs: Any) -> bool:
             raise RuntimeError("simulated process loss before local acknowledgement")
 
@@ -462,11 +465,15 @@ async def test_collector_ack_lost_after_persist_is_safely_redelivered(
         first = await dispatcher.dispatch_once()
         assert first["claimed"] == 1
         assert first["delivered"] == 0
-        assert received_ids == {expected_id}
+        assert [record["event_id"] for record in collector_store.list_events()] == [
+            expected_id
+        ]
         await database.close()
 
-        # Reopen a fresh pool as a new process would. The Collector has already
-        # persisted the event, while PostgreSQL still has only an expired lease.
+        # Recreate both durable participants as if their processes restarted:
+        # Collector rebuilds its event-ID index from JSONL; dispatcher gets a
+        # fresh pool and reclaims the expired outbox lease.
+        collector_store = JsonlEventStore(events_path, quarantine_path)
         database = await open_database(outbox_database_url)
         repository = PostgresOutboxRepository(database)
         async with database.connection() as connection:
@@ -496,7 +503,10 @@ async def test_collector_ack_lost_after_persist_is_safely_redelivered(
             "550e8400-e29b-41d4-a716-446655440903",
         ]
         assert event_correlations == request_correlations
-        assert len(received_ids) == 1
+        persisted = collector_store.list_events()
+        assert len(persisted) == 1
+        assert persisted[0]["event_id"] == expected_id
+        assert collector_store.stats()["known_event_ids"] == 1
 
         rows = await outbox_rows(database)
         assert len(rows) == 1
