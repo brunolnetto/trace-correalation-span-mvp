@@ -18,6 +18,7 @@ responsibilities and lifecycles.
 | Inventory API | Long-running service | Product catalog, stock, reservations and movement ledger |
 | Supplier Simulator | Long-running service | Supplier policies, purchase orders, simulated lead time and receipts |
 | Event Collector | Long-running service | Versioned ingestion, deduplication, durable JSONL persistence and quarantine |
+| Outbox Dispatcher | Long-running service | Claims PostgreSQL outbox rows and delivers immutable events at least once |
 | Simulation Runner | Finite sidecar | Drives a deterministic scenario through the public Order and Supplier APIs |
 | Analytics Runner | Finite sidecar | Waits for successful simulation completion and runs `dbt build` |
 | Jaeger | Supporting service | Distributed trace collection and inspection |
@@ -55,15 +56,18 @@ correlation IDs. The Supplier workflow uses a separate correlation ID.
 ## Completion barrier
 
 Compose health checks only establish that services are ready; they do not establish
-that a workload has completed or that asynchronous service log publishers have
-delivered their queues.
+that a workload has completed or that all outbox events have reached the Collector.
 
-The Simulation Runner must therefore wait for the expected events to be visible from
-the Event Collector before it exits successfully. The Collector fsyncs accepted events
-before acknowledging ingestion, so observing every expected correlation/event pair
-provides a durable persistence barrier for this finite scenario.
+The Simulation Runner depends on a healthy Outbox Dispatcher and still waits for
+the expected events to be visible from the Event Collector before it exits
+successfully. PostgreSQL-backed business events are first committed to
+`outbox_events`; the dispatcher then sends them with stable event IDs. The
+Collector fsyncs accepted events before acknowledging ingestion. Best-effort
+generator-attempt and rejected-reservation events still use the bounded process
+queue. Observing every expected correlation/event pair provides the durable
+persistence barrier for this finite scenario's required event contract.
 
-The required event contract is derived from the current producer log messages:
+The required event contract is:
 
 | Correlation scope | Required event name | Count |
 |---|---|---:|
