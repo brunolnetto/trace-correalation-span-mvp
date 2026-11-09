@@ -30,7 +30,7 @@ from app.order.workflow import (
 )
 from app.persistence.config import DatabaseSettings
 from app.persistence.database import DatabaseManager
-from app.security import authenticate_request
+from app.security import authenticate_request, service_authorization_headers
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("order-api")
@@ -125,7 +125,8 @@ async def get_order(order_id: int):
                 response = await client.get(
                     f"{INVENTORY_API_URL}/inventory/{order_id}",
                     headers={
-                        "X-Correlation-ID": correlation_id_context.get() or ""
+                        **await service_authorization_headers("inventory:read"),
+                        "X-Correlation-ID": correlation_id_context.get() or "",
                     },
                 )
                 response.raise_for_status()
@@ -193,9 +194,11 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
         saga_id = str(uuid4())
         try:
             async with workflow.create_inventory_client() as client:
+                headers = await service_authorization_headers("catalog:read")
+                headers["X-Correlation-ID"] = correlation_id
                 response = await client.get(
                     f"/products/{request.product_id}",
-                    headers={"X-Correlation-ID": correlation_id},
+                    headers=headers,
                 )
                 response.raise_for_status()
                 product = response.json()
