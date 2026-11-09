@@ -411,7 +411,11 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
                 )
             if latest_execution is not None:
                 failure_context.update(latest_execution["context"])
-            failure_context.update(compensation_tracker.last_context)
+
+        # Sagaz's in-memory listener and the durable coordinator both expose
+        # the latest compensation context. Preserve completed side-effect IDs
+        # in the final order projection for either execution mode.
+        failure_context.update(compensation_tracker.last_context)
 
         try:
             await persist_order_outcome(
