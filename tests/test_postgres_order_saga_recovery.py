@@ -16,6 +16,8 @@ from app.order.durable import (
     PostgresOrderSagaRepository,
     PostgresPaymentGateway,
 )
+from app.inventory.postgres_store import PostgresInventoryStore
+from app.inventory.store import InventoryReservationRequest
 from app.order.workflow import (
     PaymentDeclined,
     configure_order_repository,
@@ -639,6 +641,218 @@ async def test_restart_retries_refund_before_inventory_release(
         }
         assert compensation_states["charge_payment"] == "completed"
         assert compensation_states["reserve_inventory"] == "completed"
+    finally:
+        await restarted_database.close()
+
+class PostgresInventoryOrderSaga:
+    """Uses the actual PostgreSQL Inventory adapter for reservation/release."""
+
+    def __init__(
+        self,
+        inventory: PostgresInventoryStore,
+        payment_gateway: PostgresPaymentGateway,
+        *,
+        lose_reserve_response: bool = False,
+        fail_payment: bool = False,
+    ) -> None:
+        self.inventory = inventory
+        self.payment_gateway = payment_gateway
+        self.lose_reserve_response = lose_reserve_response
+        self.fail_payment = fail_payment
+        self.reserve_attempts = 0
+
+    async def reserve_inventory(self, context: dict) -> dict:
+        self.reserve_attempts += 1
+        reservation = await self.inventory.reserve(
+            context["product_id"],
+            InventoryReservationRequest(
+                order_id=context["order_id"],
+                saga_id=context["saga_id"],
+                quantity=context["quantity"],
+            ),
+        )
+        if self.lose_reserve_response:
+            self.lose_reserve_response = False
+            raise RuntimeError(
+                "simulated process loss after real Inventory reservation commit"
+            )
+        return reservation
+
+    async def charge_payment(self, context: dict) -> dict:
+        if self.fail_payment:
+            raise PaymentDeclined("simulated deterministic payment decline")
+        payment_id = await self.payment_gateway.charge(context)
+        return {"payment_id": payment_id}
+
+    async def confirm_order(self, context: dict) -> dict:
+        return {"order_status": "processed"}
+
+    async def refund_payment(self, context: dict) -> None:
+        await self.payment_gateway.refund(context["payment_id"])
+
+    async def release_inventory(self, context: dict) -> None:
+        await self.inventory.release(context["reservation_id"])
+
+
+@pytest.mark.asyncio
+async def test_real_inventory_reservation_is_not_duplicated_after_lost_response(
+    isolated_postgres_schema,
+):
+    database_url, product_id = isolated_postgres_schema
+    order_id = 910007
+    context = _context(order_id, product_id)
+
+    database = await _open_database(database_url)
+    repository = PostgresOrderSagaRepository(database)
+    gateway = PostgresPaymentGateway(database)
+    inventory = PostgresInventoryStore(database)
+    record = await repository.start_or_load(context)
+
+    with pytest.raises(RuntimeError, match="real Inventory reservation commit"):
+        await DurableOrderExecutor(repository, gateway).execute(
+            PostgresInventoryOrderSaga(
+                inventory,
+                gateway,
+                lose_reserve_response=True,
+            ),
+            tracker=None,
+            record=record,
+        )
+    await database.close()
+
+    restarted_database = await _open_database(database_url)
+    try:
+        restarted_repository = PostgresOrderSagaRepository(restarted_database)
+        restarted_gateway = PostgresPaymentGateway(restarted_database)
+        restarted_inventory = PostgresInventoryStore(restarted_database)
+        pending = await restarted_repository.get_by_order(order_id)
+        assert pending is not None
+
+        saga = PostgresInventoryOrderSaga(
+            restarted_inventory,
+            restarted_gateway,
+        )
+        result = await DurableOrderExecutor(
+            restarted_repository, restarted_gateway
+        ).execute(saga, tracker=None, record=pending)
+
+        assert result["order_status"] == "processed"
+        assert result["reservation_id"]
+        assert saga.reserve_attempts == 1
+
+        async with restarted_database.connection() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT
+                    b.reserved,
+                    (SELECT count(*) FROM reservations
+                     WHERE saga_id = %s) AS reservation_count,
+                    (SELECT count(*) FROM inventory_movements
+                     WHERE saga_id = %s
+                       AND movement_type = 'reservation_created') AS movement_count
+                FROM inventory_balances AS b
+                WHERE b.product_id = %s
+                """,
+                (context["saga_id"], context["saga_id"], product_id),
+            )
+            state = await cursor.fetchone()
+            assert state["reserved"] == context["quantity"]
+            assert state["reservation_count"] == 1
+            assert state["movement_count"] == 1
+    finally:
+        await restarted_database.close()
+
+
+@pytest.mark.asyncio
+async def test_real_inventory_release_is_idempotent_after_compensation_restart(
+    isolated_postgres_schema,
+    monkeypatch,
+):
+    database_url, product_id = isolated_postgres_schema
+    order_id = 910008
+    context = _context(order_id, product_id)
+
+    database = await _open_database(database_url)
+    repository = PostgresOrderSagaRepository(database)
+    gateway = PostgresPaymentGateway(database)
+    inventory = PostgresInventoryStore(database)
+    record = await repository.start_or_load(context)
+    saga = PostgresInventoryOrderSaga(
+        inventory,
+        gateway,
+        fail_payment=True,
+    )
+    original_mark_complete = repository.mark_compensation_completed
+
+    async def crash_after_release_commit(
+        saga_id: str, step_name: str
+    ) -> None:
+        if step_name == "reserve_inventory":
+            raise RuntimeError(
+                "simulated process loss after real Inventory release commit"
+            )
+        await original_mark_complete(saga_id, step_name)
+
+    monkeypatch.setattr(
+        repository,
+        "mark_compensation_completed",
+        crash_after_release_commit,
+    )
+    with pytest.raises(RuntimeError, match="real Inventory release commit"):
+        await DurableOrderExecutor(repository, gateway).execute(
+            saga, tracker=None, record=record
+        )
+    await database.close()
+
+    restarted_database = await _open_database(database_url)
+    try:
+        restarted_repository = PostgresOrderSagaRepository(restarted_database)
+        restarted_gateway = PostgresPaymentGateway(restarted_database)
+        restarted_inventory = PostgresInventoryStore(restarted_database)
+        pending = await restarted_repository.get_by_order(order_id)
+        assert pending is not None
+        assert pending["status"] == "compensating"
+
+        with pytest.raises(DurableOrderFailure):
+            await DurableOrderExecutor(
+                restarted_repository, restarted_gateway
+            ).execute(
+                PostgresInventoryOrderSaga(
+                    restarted_inventory,
+                    restarted_gateway,
+                ),
+                tracker=None,
+                record=pending,
+            )
+
+        async with restarted_database.connection() as connection:
+            cursor = await connection.execute(
+                """
+                SELECT
+                    b.reserved,
+                    r.status AS reservation_status,
+                    (SELECT count(*) FROM inventory_movements AS m
+                     WHERE m.saga_id = r.saga_id
+                       AND m.movement_type = 'reservation_released') AS release_count
+                FROM inventory_balances AS b
+                JOIN reservations AS r USING (product_id)
+                WHERE b.product_id = %s AND r.saga_id = %s
+                """,
+                (product_id, context["saga_id"]),
+            )
+            state = await cursor.fetchone()
+            assert state["reserved"] == 0
+            assert state["reservation_status"] == "released"
+            assert state["release_count"] == 1
+
+        recovered = await restarted_repository.get(context["saga_id"])
+        assert recovered is not None
+        reserve_step = next(
+            step for step in recovered["steps"]
+            if step["step_name"] == "reserve_inventory"
+        )
+        assert reserve_step["compensation_attempts"] == 2
+        assert reserve_step["compensation_status"] == "completed"
     finally:
         await restarted_database.close()
 
