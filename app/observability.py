@@ -11,9 +11,12 @@ from uuid import UUID, uuid4
 from fastapi import FastAPI
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.propagate import set_global_textmap
+from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
+from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import (
     TracerProvider,
@@ -126,6 +129,14 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str, ensure_ascii=False)
 
 
+class CorrelationIdLogFilter(logging.Filter):
+    """Attach the request correlation ID as an OTLP log attribute."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.correlation_id = correlation_id_context.get()
+        return True
+
+
 def configure_logging(service_name: str) -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(JsonFormatter(service_name))
@@ -134,6 +145,36 @@ def configure_logging(service_name: str) -> None:
     root_logger.setLevel(os.getenv("LOG_LEVEL", "INFO").upper())
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
+
+    logs_endpoint = os.getenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+    if logs_endpoint:
+        log_provider = LoggerProvider(
+            resource=Resource.create(
+                {
+                    "service.name": service_name,
+                    "service.version": os.getenv("SERVICE_VERSION", "0.1.0"),
+                    "deployment.environment.name": os.getenv(
+                        "ENVIRONMENT", "development"
+                    ),
+                }
+            )
+        )
+        log_provider.add_log_record_processor(
+            BatchLogRecordProcessor(
+                OTLPLogExporter(endpoint=logs_endpoint, timeout=5),
+                max_queue_size=1024,
+                max_export_batch_size=256,
+                schedule_delay_millis=1000,
+                export_timeout_millis=5000,
+            )
+        )
+        otel_handler = LoggingHandler(
+            level=logging.NOTSET,
+            logger_provider=log_provider,
+        )
+        otel_handler.addFilter(CorrelationIdLogFilter())
+        root_logger.addHandler(otel_handler)
+        atexit.register(log_provider.shutdown)
 
     # Service logs are forwarded in a background thread. Request handlers only
     # enqueue an already-formatted event; they never wait on collector I/O.
