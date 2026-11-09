@@ -275,7 +275,7 @@ ensure_local_user() {
   printf '{"type":"password","value":"%s","temporary":false}\n' \
     "$LOCAL_DEVELOPER_PASSWORD" > "$password_file"
   "${KCADM[@]}" update "users/$user_uuid/reset-password" -r "$REALM" \
-    -f "$password_file"
+    -f "$password_file" -n
 }
 
 # First create every client without audience references. Audience mapper client IDs
