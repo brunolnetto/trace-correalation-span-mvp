@@ -147,6 +147,37 @@ async def test_domain_rollback_also_rolls_back_outbox_event(
 
 
 @pytest.mark.asyncio
+async def test_outbox_event_identity_and_payload_are_immutable(
+    outbox_database_url: str,
+) -> None:
+    database = await open_database(outbox_database_url)
+    try:
+        event_id = await insert_outbox_event(database)
+        with pytest.raises(psycopg.Error, match="identity and payload are immutable"):
+            async with database.connection() as connection:
+                await connection.execute(
+                    """
+                    UPDATE outbox_events
+                    SET event_payload = jsonb_set(
+                        event_payload,
+                        '{attributes,test}',
+                        'false'::jsonb
+                    )
+                    WHERE event_id = %s
+                    """,
+                    (event_id,),
+                )
+
+        rows = await outbox_rows(database)
+        assert len(rows) == 1
+        assert str(rows[0]["event_id"]) == event_id
+        assert rows[0]["status"] == "pending"
+        assert rows[0]["event_payload"]["attributes"]["test"] is True
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
 async def test_inventory_triggers_emit_correlated_events_once(
     outbox_database_url: str,
 ) -> None:
