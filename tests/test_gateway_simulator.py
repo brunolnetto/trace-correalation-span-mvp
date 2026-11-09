@@ -535,3 +535,45 @@ async def test_gateway_records_request_counter_and_duration_histogram():
         for point in request_points
     )
     provider.shutdown()
+
+
+
+@pytest.mark.asyncio
+async def test_proxy_preserves_w3c_trace_context_and_correlation_id():
+    captured_headers: dict[str, str | None] = {}
+
+    async def upstream_handler(request: httpx.Request) -> httpx.Response:
+        captured_headers["traceparent"] = request.headers.get("traceparent")
+        captured_headers["tracestate"] = request.headers.get("tracestate")
+        captured_headers["correlation_id"] = request.headers.get("x-correlation-id")
+        return httpx.Response(200, json={"ok": True})
+
+    await gateway_app.state.http_client.aclose()
+    gateway_app.state.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(upstream_handler)
+    )
+
+    traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    tracestate = "vendor=value"
+    correlation_id = "550e8400-e29b-41d4-a716-446655440011"
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=gateway_app),
+        base_url="http://gateway.test",
+    ) as client:
+        response = await client.get(
+            "/orders/trace-context",
+            headers={
+                "traceparent": traceparent,
+                "tracestate": tracestate,
+                "X-Correlation-ID": correlation_id,
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["x-correlation-id"] == correlation_id
+    assert captured_headers == {
+        "traceparent": traceparent,
+        "tracestate": tracestate,
+        "correlation_id": correlation_id,
+    }
