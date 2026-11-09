@@ -154,7 +154,7 @@ class AsyncCollectorHandler(logging.Handler):
                     )
                     response.raise_for_status()
                 return True
-            except httpx.HTTPError:
+            except (httpx.HTTPError, RuntimeError):
                 if attempt < 2:
                     time.sleep(0.1 * (2**attempt))
         self.failed_batches += 1
