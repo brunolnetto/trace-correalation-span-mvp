@@ -330,15 +330,15 @@ async def run_scenario(
         "error": None,
     }
 
-    auth_headers = await service_authorization_headers(
-        "catalog:read",
-        "inventory:read",
-        "suppliers:read",
-        "suppliers:manage",
-        "suppliers:evaluate",
-        "simulation:control",
-    )
     try:
+        auth_headers = await service_authorization_headers(
+            "catalog:read",
+            "inventory:read",
+            "suppliers:read",
+            "suppliers:manage",
+            "suppliers:evaluate",
+            "simulation:control",
+        )
         async with (
             _make_client(
                 config.supplier_api_url,
