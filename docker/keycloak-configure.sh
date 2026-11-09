@@ -51,12 +51,12 @@ ensure_client() {
     printf '  "directAccessGrantsEnabled": false,\n'
     printf '  "implicitFlowEnabled": false,\n'
     printf '  "protocolMappers": [\n'
-    printf '    {"name":"api-scope-claim","protocol":"openid-connect","protocolMapper":"oidc-hardcoded-claim-mapper","consentRequired":false,"config":{"claim.name":"scope","claim.value":"%s","jsonType.label":"String","access.token.claim":"true","id.token.claim":"false","userinfo.token.claim":"false"}},\n' "$scopes"
+    printf '    {"name":"api-scope-claim","protocol":"openid-connect","protocolMapper":"oidc-hardcoded-claim-mapper","consentRequired":false,"config":{"claim.name":"scope","claim.value":"%s","jsonType.label":"String","access.token.claim":"true","introspection.token.claim":"true","id.token.claim":"false","userinfo.token.claim":"false"}},\n' "$scopes"
 
     local first=1 audience
     for audience in $ALL_AUDIENCES; do
       if (( first )); then first=0; else printf ',\n'; fi
-      printf '    {"name":"audience-%s","protocol":"openid-connect","protocolMapper":"oidc-audience-mapper","consentRequired":false,"config":{"included.client.audience":"%s","id.token.claim":"false","access.token.claim":"true"}}' "$audience" "$audience"
+      printf '    {"name":"audience-%s","protocol":"openid-connect","protocolMapper":"oidc-audience-mapper","consentRequired":false,"config":{"included.client.audience":"%s","id.token.claim":"false","access.token.claim":"true","introspection.token.claim":"true"}}' "$audience" "$audience"
     done
     printf '\n  ]\n'
     printf '}\n'
