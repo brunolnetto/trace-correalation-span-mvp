@@ -13,12 +13,15 @@ structured service events for dbt analytics.
 ## Architecture
 
 ```text
-Client
+Client / workload generator
   |
   | X-Correlation-ID (business-operation identifier)
   | traceparent (W3C Trace Context, when supplied)
   v
-Order API
+Gateway Simulator (local experimental ingress)
+  |-- versioned route policies, latency, throttling, and fault injection
+  |
+  +--> Order API
   |
   | Durable Order Saga coordinator (PostgreSQL mode)
   |   Sagaz action/compensation definitions:
@@ -265,6 +268,39 @@ The defaults can be overridden through CLI flags or environment variables:
 `ORDER_GENERATOR_SUCCESS_QUANTITY`, `ORDER_GENERATOR_DECLINE_QUANTITY`, and
 `ORDER_GENERATOR_INSUFFICIENT_QUANTITY` overrides.
 
+
+## API Gateway behavior simulator
+
+The local Gateway Simulator exposes a reverse-proxy boundary at port 18004.
+It forwards /orders to Order API, /products and /inventory to Inventory API,
+and supplier lifecycle paths to Supplier Simulation API. The default policy
+does not add latency or inject failures.
+
+Inspect the active policy and health:
+
+```bash
+curl http://localhost:18004/_simulator/healthz
+curl http://localhost:18004/_simulator/policy
+```
+
+Replay a request with stable simulation identity:
+
+```bash
+curl -i http://localhost:18004/inventory/7 \
+  -H 'X-Correlation-ID: 550e8400-e29b-41d4-a716-446655440001' \
+  -H 'X-Simulation-Request-ID: baseline-inventory-lookup'
+```
+
+Use /_simulator/policy with PUT to replace the complete route set. Updates
+require expected_revision and increment the immutable policy revision.
+The policy seed, revision, route ID, and X-Simulation-Request-ID determine
+repeatable latency and injected-failure decisions. Token buckets and in-flight
+limits are process-local and shared per route/revision. The control surface is
+intentionally unauthenticated and must remain bound to localhost; it is not
+suitable for an untrusted network. See
+[the Gateway Simulator guide](docs/api-gateway-simulator.md) for policy fields,
+examples, and current limitations.
+
 ## Supplier onboarding and replenishment simulation
 
 The Supplier Simulation API is exposed on port 18002. Its fixture catalog
@@ -447,8 +483,10 @@ dbt build as one finite Compose workload:
 bash scripts/run-standalone.sh
 ```
 
-The wrapper starts the Order API, Inventory API, Supplier Simulator, Event
-Collector, and Jaeger. It waits for the Simulation Runner to exit and checks
+The wrapper starts the Gateway Simulator, Order API, Inventory API, Supplier
+Simulator, Event Collector, and Jaeger. The standalone workload sends external
+Order, Inventory, and Supplier requests through the Gateway Simulator; internal
+service-to-service calls retain their direct service URLs. It waits for the Simulation Runner to exit and checks
 its actual container exit code. Only after successful simulation completion
 does it wait for the Analytics Runner and return that job's exit code. It
 does not use `--abort-on-container-exit`: that option would stop the long-running

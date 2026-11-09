@@ -60,7 +60,11 @@ class CorrelationIdMiddleware:
 
         async def send_with_correlation_id(message):
             if message["type"] == "http.response.start":
-                response_headers = list(message.get("headers", []))
+                response_headers = [
+                    (name, value)
+                    for name, value in message.get("headers", [])
+                    if name.lower() != CORRELATION_ID_HEADER
+                ]
                 response_headers.append(
                     (CORRELATION_ID_HEADER, correlation_id.encode("ascii"))
                 )

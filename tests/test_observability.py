@@ -23,6 +23,15 @@ def correlation_app():
     async def read_context():
         return {"correlation_id": correlation_id_context.get()}
 
+    @app.get("/duplicate-header")
+    async def duplicate_header():
+        from fastapi.responses import Response
+
+        return Response(
+            content="ok",
+            headers={"X-Correlation-ID": "stale-response-value"},
+        )
+
     return app
 
 
@@ -164,3 +173,20 @@ def test_correlation_id_log_filter_preserves_explicit_background_context():
 
     assert CorrelationIdLogFilter().filter(record) is True
     assert record.correlation_id == explicit
+
+
+@pytest.mark.asyncio
+async def test_correlation_middleware_replaces_preexisting_response_header(
+    correlation_app,
+):
+    expected = "550e8400-e29b-41d4-a716-446655440009"
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=correlation_app),
+        base_url="http://test",
+    ) as client:
+        response = await client.get(
+            "/duplicate-header",
+            headers={"X-Correlation-ID": expected},
+        )
+
+    assert response.headers.get_list("X-Correlation-ID") == [expected]
