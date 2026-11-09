@@ -55,7 +55,7 @@ CREATE INDEX outbox_events_blocked_idx
 CREATE OR REPLACE FUNCTION protect_outbox_event_identity()
 RETURNS TRIGGER
 LANGUAGE plpgsql
-AS $
+AS $$
 BEGIN
     IF ROW(
         OLD.event_id,
@@ -81,7 +81,7 @@ BEGIN
     END IF;
     RETURN NEW;
 END;
-$;
+$$;
 
 CREATE TRIGGER outbox_event_identity_immutable
     BEFORE UPDATE ON outbox_events
