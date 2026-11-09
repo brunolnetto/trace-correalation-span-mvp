@@ -10,20 +10,20 @@ import psycopg
 import pytest
 from psycopg import sql
 
+from app.inventory.postgres_store import PostgresInventoryStore
+from app.inventory.store import InventoryReservationRequest
 from app.order.durable import (
     DurableOrderExecutor,
     DurableOrderFailure,
     PostgresOrderSagaRepository,
     PostgresPaymentGateway,
 )
-from app.inventory.postgres_store import PostgresInventoryStore
-from app.inventory.store import InventoryReservationRequest
+from app.order.repository import PostgresOrderRepository
 from app.order.workflow import (
     PaymentDeclined,
     configure_order_repository,
     persist_order,
 )
-from app.order.repository import PostgresOrderRepository
 from app.persistence.config import DatabaseSettings
 from app.persistence.database import DatabaseManager
 from app.persistence.migrations import MIGRATIONS_DIR, apply_migrations
