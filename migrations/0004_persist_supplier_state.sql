@@ -132,5 +132,5 @@ CREATE TRIGGER supplier_po_transitions_no_truncate
 
 CREATE TABLE supplier_simulation_clock (
     singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
-    current_time TIMESTAMPTZ NOT NULL
+    simulation_time TIMESTAMPTZ NOT NULL
 );
