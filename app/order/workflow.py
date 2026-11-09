@@ -27,6 +27,10 @@ class ProcessOrderRequest(BaseModel):
 class PaymentDeclined(Exception):
     """Raised when the demo payment gateway rejects a charge."""
 
+    def __init__(self, message: str, *, payment_id: str | None = None) -> None:
+        super().__init__(message)
+        self.payment_id = payment_id
+
 
 class PaymentGateway:
     """Process-local payment adapter used by this runnable MVP."""
