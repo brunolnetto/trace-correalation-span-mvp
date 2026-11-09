@@ -113,11 +113,13 @@ def _make_client(
     base_url: str,
     timeout_seconds: float,
     transport: httpx.AsyncBaseTransport | None,
+    headers: dict[str, str] | None = None,
 ) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         base_url=base_url.rstrip("/"),
         timeout=httpx.Timeout(timeout_seconds, connect=min(3.0, timeout_seconds)),
         transport=transport,
+        headers=headers,
     )
 
 
@@ -328,17 +330,27 @@ async def run_scenario(
         "error": None,
     }
 
+    auth_headers = await service_authorization_headers(
+        "catalog:read",
+        "inventory:read",
+        "suppliers:read",
+        "suppliers:manage",
+        "suppliers:evaluate",
+        "simulation:control",
+    )
     try:
         async with (
             _make_client(
                 config.supplier_api_url,
                 config.request_timeout_seconds,
                 transport,
+                headers=auth_headers,
             ) as supplier,
             _make_client(
                 config.inventory_api_url,
                 config.request_timeout_seconds,
                 transport,
+                headers=auth_headers,
             ) as inventory,
         ):
             product = await _request_json(
