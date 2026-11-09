@@ -13,7 +13,10 @@ from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from opentelemetry import metrics, trace
 
-from app.gateway_simulator.metrics import GatewayMetrics
+from app.gateway_simulator.metrics import (
+    GATEWAY_METRIC_VIEWS,
+    GatewayMetrics,
+)
 from app.gateway_simulator.policy import (
     GatewayPolicy,
     GatewayRuntime,
@@ -120,7 +123,11 @@ app = FastAPI(
 )
 app.state.policy_store = policy_store
 app.state.gateway_runtime = gateway_runtime
-configure_observability(app, os.getenv("SERVICE_NAME", "gateway-simulator"))
+configure_observability(
+    app,
+    os.getenv("SERVICE_NAME", "gateway-simulator"),
+    metric_views=GATEWAY_METRIC_VIEWS,
+)
 app.state.gateway_metrics = GatewayMetrics(
     metrics.get_meter("app.gateway_simulator")
 )
