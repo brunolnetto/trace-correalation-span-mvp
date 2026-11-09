@@ -10,7 +10,7 @@ x-oidc-env: &oidc-env
 
 services:
   keycloak:
-    image: quay.io/keycloak/keycloak:26.6.2
+    image: quay.io/keycloak/keycloak:26.8.2
     command: ["start-dev", "--health-enabled=true"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-local-admin}
@@ -40,7 +40,7 @@ services:
           memory: 1G
 
   keycloak-config:
-    image: quay.io/keycloak/keycloak:26.6.2
+    image: quay.io/keycloak/keycloak:26.8.2
     entrypoint: ["/bin/bash", "/opt/keycloak/bootstrap/configure.sh"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-local-admin}
