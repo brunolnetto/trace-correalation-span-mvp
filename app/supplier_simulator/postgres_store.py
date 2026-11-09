@@ -406,211 +406,232 @@ class PostgresSupplierSimulation:
             if product_id is not None and current_product_id != product_id:
                 continue
 
-            async with self.database.connection() as connection:
-                cursor = await connection.execute(
-                    """
-                    SELECT inventory_revision
-                    FROM supplier_reorder_policies
-                    WHERE product_id = %s
-                    """,
-                    (current_product_id,),
+            # Inventory remains the stock authority. Read its state outside a
+            # supplier DB transaction, then verify that no receipt finalized
+            # between the read and acquiring the policy serialization lock.
+            for _attempt in range(5):
+                async with self.database.connection() as connection:
+                    cursor = await connection.execute(
+                        """
+                        SELECT inventory_revision
+                        FROM supplier_reorder_policies
+                        WHERE product_id = %s
+                        """,
+                        (current_product_id,),
+                    )
+                    revision_row = await cursor.fetchone()
+                    if revision_row is None:
+                        break
+                    inventory_revision = revision_row["inventory_revision"]
+
+                inventory_response = await client.get(
+                    f"/inventory/{current_product_id}",
+                    headers={"X-Correlation-ID": correlation_id},
                 )
-                revision_row = await cursor.fetchone()
-                if revision_row is None:
+                inventory_response.raise_for_status()
+                inventory = inventory_response.json()
+                on_hand = int(inventory["on_hand"])
+                reserved = int(inventory["reserved"])
+                available = on_hand - reserved
+
+                retry_inventory_read = False
+                async with self.database.connection() as connection:
+                    cursor = await connection.execute(
+                        """
+                        SELECT *
+                        FROM supplier_reorder_policies
+                        WHERE product_id = %s
+                        FOR UPDATE
+                        """,
+                        (current_product_id,),
+                    )
+                    policy_row = await cursor.fetchone()
+                    if policy_row is None:
+                        break
+                    if policy_row["inventory_revision"] != inventory_revision:
+                        # A receipt finalized after the Inventory read. Release
+                        # the policy lock and refresh Inventory on the next pass.
+                        retry_inventory_read = True
+                    else:
+                        current_policy = _policy(policy_row)
+                        cursor = await connection.execute(
+                            """
+                            SELECT
+                                po.*,
+                                line.quantity,
+                                line.supplier_sku,
+                                line.unit_cost
+                            FROM supplier_purchase_orders AS po
+                            JOIN supplier_purchase_order_lines AS line
+                              ON line.purchase_order_id = po.purchase_order_id
+                             AND line.line_number = 1
+                            WHERE po.product_id = %s
+                              AND po.status IN ('created', 'ordered', 'receiving')
+                            ORDER BY po.created_at, po.purchase_order_id
+                            FOR UPDATE OF po
+                            """,
+                            (current_product_id,),
+                        )
+                        active_rows = await cursor.fetchall()
+                        active_orders = [
+                            _purchase_order(row) for row in active_rows
+                        ]
+                        on_order = sum(
+                            order["quantity"] for order in active_orders
+                        )
+                        inventory_position = available + on_order
+                        active_ids = [
+                            order["purchase_order_id"]
+                            for order in active_orders
+                        ]
+
+                        if active_orders:
+                            decisions.append(
+                                {
+                                    "product_id": current_product_id,
+                                    "decision": "open_purchase_order_exists",
+                                    "on_hand": on_hand,
+                                    "reserved": reserved,
+                                    "available_quantity": available,
+                                    "on_order": on_order,
+                                    "inventory_position": inventory_position,
+                                    "purchase_order_ids": active_ids,
+                                }
+                            )
+                        elif inventory_position > current_policy["reorder_point"]:
+                            decisions.append(
+                                {
+                                    "product_id": current_product_id,
+                                    "decision": "no_reorder",
+                                    "on_hand": on_hand,
+                                    "reserved": reserved,
+                                    "available_quantity": available,
+                                    "on_order": 0,
+                                    "inventory_position": inventory_position,
+                                    "purchase_order_ids": [],
+                                }
+                            )
+                        else:
+                            quantity = (
+                                current_policy["target_stock"] - inventory_position
+                            )
+                            if quantity <= 0:
+                                decisions.append(
+                                    {
+                                        "product_id": current_product_id,
+                                        "decision": "no_reorder",
+                                        "on_hand": on_hand,
+                                        "reserved": reserved,
+                                        "available_quantity": available,
+                                        "on_order": 0,
+                                        "inventory_position": inventory_position,
+                                        "purchase_order_ids": [],
+                                    }
+                                )
+                            else:
+                                cursor = await connection.execute(
+                                    """
+                                    SELECT supplier_sku, unit_price
+                                    FROM supplier_offerings
+                                    WHERE product_id = %s
+                                    """,
+                                    (current_product_id,),
+                                )
+                                offering = await cursor.fetchone()
+                                supplier_sku = (
+                                    offering["supplier_sku"]
+                                    if offering
+                                    else None
+                                )
+                                unit_cost = (
+                                    offering["unit_price"] if offering else None
+                                )
+                                now = await self._clock_time(connection)
+                                purchase_order_uuid = uuid4()
+
+                                await connection.execute(
+                                    """
+                                    INSERT INTO supplier_purchase_orders (
+                                        purchase_order_id, product_id,
+                                        policy_version, status, reorder_point,
+                                        target_stock, inventory_position_at_order,
+                                        on_hand_at_order, reserved_at_order,
+                                        on_order_at_order, lead_time_seconds,
+                                        created_at, updated_at
+                                    )
+                                    VALUES (
+                                        %s, %s, %s, 'created', %s, %s, %s,
+                                        %s, %s, %s, %s, %s, %s
+                                    )
+                                    """,
+                                    (
+                                        purchase_order_uuid,
+                                        current_product_id,
+                                        current_policy["version"],
+                                        current_policy["reorder_point"],
+                                        current_policy["target_stock"],
+                                        inventory_position,
+                                        on_hand,
+                                        reserved,
+                                        0,
+                                        current_policy["lead_time_seconds"],
+                                        now,
+                                        now,
+                                    ),
+                                )
+                                await connection.execute(
+                                    """
+                                    INSERT INTO supplier_purchase_order_lines (
+                                        purchase_order_id, line_number,
+                                        product_id, supplier_sku, quantity,
+                                        unit_cost
+                                    )
+                                    VALUES (%s, 1, %s, %s, %s, %s)
+                                    """,
+                                    (
+                                        purchase_order_uuid,
+                                        current_product_id,
+                                        supplier_sku,
+                                        quantity,
+                                        unit_cost,
+                                    ),
+                                )
+                                await self._insert_transition(
+                                    connection,
+                                    purchase_order_uuid,
+                                    None,
+                                    "created",
+                                    now,
+                                    correlation_id,
+                                    {
+                                        "policy_version": current_policy["version"],
+                                        "inventory_position": inventory_position,
+                                        "quantity": quantity,
+                                    },
+                                )
+                                purchase_order = await self._load_purchase_order(
+                                    connection, purchase_order_uuid
+                                )
+                                decisions.append(
+                                    {
+                                        "product_id": current_product_id,
+                                        "decision": "purchase_order_created",
+                                        "on_hand": on_hand,
+                                        "reserved": reserved,
+                                        "available_quantity": available,
+                                        "on_order": 0,
+                                        "inventory_position": inventory_position,
+                                        "purchase_order": purchase_order,
+                                    }
+                                )
+
+                if retry_inventory_read:
                     continue
-                inventory_revision = revision_row["inventory_revision"]
-
-            inventory_response = await client.get(
-                f"/inventory/{current_product_id}",
-                headers={"X-Correlation-ID": correlation_id},
-            )
-            inventory_response.raise_for_status()
-            inventory = inventory_response.json()
-            on_hand = int(inventory["on_hand"])
-            reserved = int(inventory["reserved"])
-            available = on_hand - reserved
-
-            async with self.database.connection() as connection:
-                cursor = await connection.execute(
-                    """
-                    SELECT *
-                    FROM supplier_reorder_policies
-                    WHERE product_id = %s
-                    FOR UPDATE
-                    """,
-                    (current_product_id,),
-                )
-                policy_row = await cursor.fetchone()
-                if policy_row is None:
-                    continue
-                current_policy = _policy(policy_row)
-                if policy_row["inventory_revision"] != inventory_revision:
-                    # A receipt may have committed after the first Inventory
-                    # read. Re-read while holding the policy lock so a stale
-                    # pre-receipt balance cannot create a duplicate PO after
-                    # the prior PO transitions out of the active state.
-                    inventory_response = await client.get(
-                        f"/inventory/{current_product_id}",
-                        headers={"X-Correlation-ID": correlation_id},
-                    )
-                    inventory_response.raise_for_status()
-                    inventory = inventory_response.json()
-                    on_hand = int(inventory["on_hand"])
-                    reserved = int(inventory["reserved"])
-                    available = on_hand - reserved
-
-                cursor = await connection.execute(
-                    """
-                    SELECT
-                        po.*,
-                        line.quantity,
-                        line.supplier_sku,
-                        line.unit_cost
-                    FROM supplier_purchase_orders AS po
-                    JOIN supplier_purchase_order_lines AS line
-                      ON line.purchase_order_id = po.purchase_order_id
-                     AND line.line_number = 1
-                    WHERE po.product_id = %s
-                      AND po.status IN ('created', 'ordered', 'receiving')
-                    ORDER BY po.created_at, po.purchase_order_id
-                    FOR UPDATE OF po
-                    """,
-                    (current_product_id,),
-                )
-                active_rows = await cursor.fetchall()
-                active_orders = [_purchase_order(row) for row in active_rows]
-                on_order = sum(order["quantity"] for order in active_orders)
-                inventory_position = available + on_order
-                active_ids = [order["purchase_order_id"] for order in active_orders]
-
-                if active_orders:
-                    decisions.append(
-                        {
-                            "product_id": current_product_id,
-                            "decision": "open_purchase_order_exists",
-                            "on_hand": on_hand,
-                            "reserved": reserved,
-                            "available_quantity": available,
-                            "on_order": on_order,
-                            "inventory_position": inventory_position,
-                            "purchase_order_ids": active_ids,
-                        }
-                    )
-                    continue
-
-                if inventory_position > current_policy["reorder_point"]:
-                    decisions.append(
-                        {
-                            "product_id": current_product_id,
-                            "decision": "no_reorder",
-                            "on_hand": on_hand,
-                            "reserved": reserved,
-                            "available_quantity": available,
-                            "on_order": 0,
-                            "inventory_position": inventory_position,
-                            "purchase_order_ids": [],
-                        }
-                    )
-                    continue
-
-                quantity = current_policy["target_stock"] - inventory_position
-                if quantity <= 0:
-                    decisions.append(
-                        {
-                            "product_id": current_product_id,
-                            "decision": "no_reorder",
-                            "on_hand": on_hand,
-                            "reserved": reserved,
-                            "available_quantity": available,
-                            "on_order": 0,
-                            "inventory_position": inventory_position,
-                            "purchase_order_ids": [],
-                        }
-                    )
-                    continue
-
-                cursor = await connection.execute(
-                    """
-                    SELECT supplier_sku, unit_price
-                    FROM supplier_offerings
-                    WHERE product_id = %s
-                    """,
-                    (current_product_id,),
-                )
-                offering = await cursor.fetchone()
-                supplier_sku = offering["supplier_sku"] if offering else None
-                unit_cost = offering["unit_price"] if offering else None
-                now = await self._clock_time(connection)
-                purchase_order_uuid = uuid4()
-
-                await connection.execute(
-                    """
-                    INSERT INTO supplier_purchase_orders (
-                        purchase_order_id, product_id, policy_version, status,
-                        reorder_point, target_stock, inventory_position_at_order,
-                        on_hand_at_order, reserved_at_order, on_order_at_order,
-                        lead_time_seconds, created_at, updated_at
-                    )
-                    VALUES (%s, %s, %s, 'created', %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        purchase_order_uuid,
-                        current_product_id,
-                        current_policy["version"],
-                        current_policy["reorder_point"],
-                        current_policy["target_stock"],
-                        inventory_position,
-                        on_hand,
-                        reserved,
-                        0,
-                        current_policy["lead_time_seconds"],
-                        now,
-                        now,
-                    ),
-                )
-                await connection.execute(
-                    """
-                    INSERT INTO supplier_purchase_order_lines (
-                        purchase_order_id, line_number, product_id,
-                        supplier_sku, quantity, unit_cost
-                    )
-                    VALUES (%s, 1, %s, %s, %s, %s)
-                    """,
-                    (
-                        purchase_order_uuid,
-                        current_product_id,
-                        supplier_sku,
-                        quantity,
-                        unit_cost,
-                    ),
-                )
-                await self._insert_transition(
-                    connection,
-                    purchase_order_uuid,
-                    None,
-                    "created",
-                    now,
-                    correlation_id,
-                    {
-                        "policy_version": current_policy["version"],
-                        "inventory_position": inventory_position,
-                        "quantity": quantity,
-                    },
-                )
-                purchase_order = await self._load_purchase_order(
-                    connection, purchase_order_uuid
-                )
-                decisions.append(
-                    {
-                        "product_id": current_product_id,
-                        "decision": "purchase_order_created",
-                        "on_hand": on_hand,
-                        "reserved": reserved,
-                        "available_quantity": available,
-                        "on_order": 0,
-                        "inventory_position": inventory_position,
-                        "purchase_order": purchase_order,
-                    }
+                break
+            else:
+                raise RuntimeError(
+                    "Inventory changed during every replenishment attempt; "
+                    "retry the evaluation"
                 )
         return decisions
 
