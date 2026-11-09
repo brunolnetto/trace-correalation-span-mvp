@@ -50,8 +50,8 @@ class PostgresOutboxRepository:
                         AND lease_expires_at <= now()
                     )
                     ORDER BY available_at, created_at, outbox_id
-                    FOR UPDATE SKIP LOCKED
                     LIMIT %s
+                    FOR UPDATE SKIP LOCKED
                 )
                 UPDATE outbox_events AS event
                 SET status = 'leased',
