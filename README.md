@@ -45,20 +45,23 @@ Supplier Simulation API
   |-- Simulated Lead-Time Clock
   +-- Idempotent receipts through Inventory API
 
-Order, Inventory, and Supplier JSON logs
-  |
-  | bounded asynchronous publisher
-  v
-Event Collector
-  |-- Versioned Event Envelope
-  |-- Append-only JSONL + Quarantine
-  +-- Persistent Docker Volume
+PostgreSQL domain transactions
+  |-- Domain state mutation
+  +-- Immutable outbox event (same transaction)
          |
          v
-      dbt + DuckDB Analytics
+Outbox Dispatcher -- leased, at-least-once delivery --> Event Collector
+                                                        |-- Versioned Envelope
+                                                        |-- Append-only JSONL
+                                                        |-- Quarantine
+                                                        +-- Persistent Volume
+                                                               |
+                                                               v
+                                                            dbt + DuckDB
 
-Services export OTLP traces to Jaeger. Order, Inventory, and Supplier logs
-are forwarded asynchronously to the raw event collector.
+Non-transactional events (generator attempts and rejected reservations) use
+the bounded best-effort publisher. Diagnostic JSON logs remain on stdout.
+Services export OTLP traces to Jaeger.
 ```
 
 - **correlation_id** identifies the business operation across services.
