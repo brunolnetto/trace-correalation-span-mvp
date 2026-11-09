@@ -107,7 +107,7 @@ ensure_client() {
     printf '  "standardFlowEnabled": false,\n'
     printf '  "directAccessGrantsEnabled": false,\n'
     printf '  "implicitFlowEnabled": false,\n'
-    printf '  "defaultOptionalClientScopes": ['
+    printf '  "optionalClientScopes": ['
     local first=1 scope
     for scope in $scopes; do
       if (( first )); then first=0; else printf ', '; fi
@@ -154,7 +154,7 @@ ensure_browser_client() {
   local client="local-web"
   local json_file client_uuid clients_json line
 
-  json_file="/tmp/keycloak-client-\${client}-$BASHPID.json"
+  json_file="/tmp/keycloak-client-${client}-$BASHPID.json"
   TEMP_FILES+=("$json_file")
   {
     printf '{\n'
@@ -204,7 +204,7 @@ ensure_browser_client() {
   client_uuid=""
   while IFS= read -r line; do
     if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
-      client_uuid="\${BASH_REMATCH[1]}"
+      client_uuid="${BASH_REMATCH[1]}"
       break
     fi
   done <<< "$clients_json"
@@ -242,7 +242,7 @@ ensure_local_user() {
   user_uuid=""
   while IFS= read -r line; do
     if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
-      user_uuid="\${BASH_REMATCH[1]}"
+      user_uuid="${BASH_REMATCH[1]}"
       break
     fi
   done <<< "$users_json"
@@ -254,7 +254,7 @@ ensure_local_user() {
     users_json="$($KCADM get users -r "$REALM" -q "username=$username")"
     while IFS= read -r line; do
       if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
-        user_uuid="\${BASH_REMATCH[1]}"
+        user_uuid="${BASH_REMATCH[1]}"
         break
       fi
     done <<< "$users_json"
