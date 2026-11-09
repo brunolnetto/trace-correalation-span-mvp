@@ -4,7 +4,7 @@ import os
 from typing import Any
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Security
 from pydantic import BaseModel, Field, ValidationError
 
 from app.event_collector.store import (
@@ -12,6 +12,7 @@ from app.event_collector.store import (
     RawEvent,
 )
 from app.observability import configure_observability
+from app.security import authenticate_request
 
 app = FastAPI(
     title="Raw Event Collector",
@@ -35,7 +36,7 @@ async def healthcheck():
     return {"status": "ok", "service": "event-collector"}
 
 
-@app.post("/v1/events", status_code=202, tags=["events"])
+@app.post("/v1/events", status_code=202, tags=["events"], dependencies=[Security(authenticate_request, scopes=["events:ingest"])])
 def ingest_events(request: EventBatchRequest):
     valid: list[RawEvent] = []
     quarantined = 0
@@ -67,12 +68,12 @@ def ingest_events(request: EventBatchRequest):
     return result
 
 
-@app.get("/v1/events", tags=["events"])
+@app.get("/v1/events", tags=["events"], dependencies=[Security(authenticate_request, scopes=["events:read"])])
 async def list_events(limit: int = Query(default=100, ge=1, le=10_000)):
     return {"events": store.list_events(limit=limit)}
 
 
-@app.get("/v1/events/{event_id}", tags=["events"])
+@app.get("/v1/events/{event_id}", tags=["events"], dependencies=[Security(authenticate_request, scopes=["events:read"])])
 async def get_event(event_id: UUID):
     result = store.get_event(event_id)
     if result is None:
@@ -80,11 +81,11 @@ async def get_event(event_id: UUID):
     return result
 
 
-@app.get("/v1/quarantine", tags=["events"])
+@app.get("/v1/quarantine", tags=["events"], dependencies=[Security(authenticate_request, scopes=["events:read"])])
 async def list_quarantine(limit: int = Query(default=100, ge=1, le=10_000)):
     return {"records": store.list_quarantine(limit=limit)}
 
 
-@app.get("/v1/stats", tags=["events"])
+@app.get("/v1/stats", tags=["events"], dependencies=[Security(authenticate_request, scopes=["events:read"])])
 async def get_stats():
     return store.stats()
