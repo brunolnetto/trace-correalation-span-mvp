@@ -38,6 +38,14 @@ jobs:
         run: uv lock --check --python 3.12
       - name: Install dependencies
         run: uv sync --locked --all-groups
+      - name: Validate Compose and reproduction shell
+        run: |
+          bash -n scripts/reproduce-local.sh
+          docker compose config --quiet
+          docker run --rm \
+            -v "$PWD/docker/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro" \
+            otel/opentelemetry-collector-contrib:0.141.0 \
+            validate --config=/etc/otelcol-contrib/config.yaml
       - name: Run tests
         run: uv run pytest
       - name: Lint

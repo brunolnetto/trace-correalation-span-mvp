@@ -24,13 +24,20 @@ INVENTORY_API_HOST_PORT="${INVENTORY_API_HOST_PORT:-18001}"
 SUPPLIER_HOST_PORT="${SUPPLIER_HOST_PORT:-18002}"
 EVENT_COLLECTOR_HOST_PORT="${EVENT_COLLECTOR_HOST_PORT:-18003}"
 JAEGER_UI_HOST_PORT="${JAEGER_UI_HOST_PORT:-16686}"
+GRAFANA_HOST_PORT="${GRAFANA_HOST_PORT:-13000}"
+LOKI_HOST_PORT="${LOKI_HOST_PORT:-13100}"
 OTLP_GRPC_HOST_PORT="${OTLP_GRPC_HOST_PORT:-4317}"
 OTLP_HTTP_HOST_PORT="${OTLP_HTTP_HOST_PORT:-4318}"
+OTEL_HEALTH_HOST_PORT="${OTEL_HEALTH_HOST_PORT:-13133}"
 export ORDER_API_HOST_PORT INVENTORY_API_HOST_PORT SUPPLIER_HOST_PORT
-export EVENT_COLLECTOR_HOST_PORT JAEGER_UI_HOST_PORT OTLP_GRPC_HOST_PORT OTLP_HTTP_HOST_PORT
+export EVENT_COLLECTOR_HOST_PORT JAEGER_UI_HOST_PORT GRAFANA_HOST_PORT LOKI_HOST_PORT
+export OTLP_GRPC_HOST_PORT OTLP_HTTP_HOST_PORT OTEL_HEALTH_HOST_PORT
 ORDER_URL="${ORDER_URL:-http://127.0.0.1:${ORDER_API_HOST_PORT}}"
 INVENTORY_URL="${INVENTORY_URL:-http://127.0.0.1:${INVENTORY_API_HOST_PORT}}"
 JAEGER_URL="${JAEGER_URL:-http://127.0.0.1:${JAEGER_UI_HOST_PORT}}"
+GRAFANA_URL="${GRAFANA_URL:-http://127.0.0.1:${GRAFANA_HOST_PORT}}"
+LOKI_URL="${LOKI_URL:-http://127.0.0.1:${LOKI_HOST_PORT}}"
+OTEL_HEALTH_URL="${OTEL_HEALTH_URL:-http://127.0.0.1:${OTEL_HEALTH_HOST_PORT}}"
 SUPPLIER_URL="${SUPPLIER_URL:-http://127.0.0.1:${SUPPLIER_HOST_PORT}}"
 EVENT_COLLECTOR_URL="${EVENT_COLLECTOR_URL:-http://127.0.0.1:${EVENT_COLLECTOR_HOST_PORT}}"
 export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-15432}"
@@ -136,6 +143,9 @@ echo "    waiting for service health endpoints (up to ${WAIT_SECONDS}s)"
 wait_for_url "$INVENTORY_URL/healthz" "inventory-api"
 wait_for_url "$ORDER_URL/healthz" "order-api"
 wait_for_url "$JAEGER_URL/" "Jaeger UI"
+wait_for_url "$LOKI_URL/ready" "Loki"
+wait_for_url "$GRAFANA_URL/api/health" "Grafana"
+wait_for_url "$OTEL_HEALTH_URL/" "OpenTelemetry Collector"
 wait_for_url "$EVENT_COLLECTOR_URL/healthz" "event-collector"
 wait_for_url "$SUPPLIER_URL/healthz" "supplier-simulator"
 wait_for_internal_service "outbox-dispatcher" "http://127.0.0.1:8011/healthz"
@@ -431,6 +441,50 @@ if (( ! TRACE_FOUND )); then
   die "Trace validation failed; inspect $TRACE_URL"
 fi
 echo "    Jaeger contains declined-order trace $DECLINE_TRACE_ID with cross-service reservation + compensation"
+
+# Search Loki by the same business correlation ID used to find the trace.
+# Correlation ID is structured metadata, not an indexed label.
+LOKI_QUERY='{service_name="order-api"} | correlation_id="'"$DECLINE_CORRELATION_ID"'" | trace_id!=""'
+LOKI_FOUND=0
+LOKI_END_NS="$(python3 -c 'import time; print(time.time_ns())')"
+LOKI_START_NS="$((LOKI_END_NS - 600000000000))"
+deadline=$((SECONDS + WAIT_SECONDS))
+while (( SECONDS < deadline )); do
+  if curl --silent --show-error --fail --get \
+    --data-urlencode "query=$LOKI_QUERY" \
+    --data-urlencode "limit=1000" \
+    --data-urlencode "start=$LOKI_START_NS" \
+    --data-urlencode "end=$LOKI_END_NS" \
+    "$LOKI_URL/loki/api/v1/query_range" -o "$TMP_DIR/loki-query.json"; then
+    if python3 - "$TMP_DIR/loki-query.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text())
+streams = payload.get("data", {}).get("result", [])
+messages = [
+    line
+    for stream in streams
+    for _, line in stream.get("values", [])
+]
+if any("order.process.failed" in line for line in messages):
+    print(f"    Loki returned {len(messages)} records for the declined-order correlation ID")
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+    then
+      LOKI_FOUND=1
+      break
+    fi
+  fi
+  sleep 2
+done
+(( LOKI_FOUND )) || {
+  echo "Loki query failed: $LOKI_QUERY" >&2
+  cat "$TMP_DIR/loki-query.json" >&2 || true
+  die "Could not find the declined-order diagnostic log in Loki"
+}
 python3 - "$TMP_DIR/service.log" "$PROCESS_CORRELATION_ID" \
   "$DECLINE_CORRELATION_ID" "$INSUFFICIENT_CORRELATION_ID" <<'PY'
 import json
