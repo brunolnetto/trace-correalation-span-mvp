@@ -6,9 +6,10 @@ from uuid import UUID, uuid4
 
 import httpx
 from psycopg import AsyncConnection
+from psycopg.types.json import Jsonb
 
 from app.persistence.database import DatabaseManager
-from app.supplier_simulator.store import AdvanceClockRequest, ReorderPolicy
+from app.supplier_simulator.store import ReorderPolicy
 
 
 def _iso(value: Any) -> str | None:
@@ -641,7 +642,7 @@ class PostgresSupplierSimulation:
                 to_status,
                 occurred_at,
                 correlation_id or None,
-                metadata or {},
+                Jsonb(metadata or {}),
             ),
         )
 
