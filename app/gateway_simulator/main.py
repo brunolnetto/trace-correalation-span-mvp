@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from time import perf_counter
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from uuid import uuid4
@@ -10,8 +11,9 @@ from uuid import uuid4
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from opentelemetry import trace
+from opentelemetry import metrics, trace
 
+from app.gateway_simulator.metrics import GatewayMetrics
 from app.gateway_simulator.policy import (
     GatewayPolicy,
     GatewayRuntime,
@@ -119,6 +121,32 @@ app = FastAPI(
 app.state.policy_store = policy_store
 app.state.gateway_runtime = gateway_runtime
 configure_observability(app, os.getenv("SERVICE_NAME", "gateway-simulator"))
+app.state.gateway_metrics = GatewayMetrics(
+    metrics.get_meter("app.gateway_simulator")
+)
+
+
+@app.middleware("http")
+async def collect_gateway_request_metrics(request: Request, call_next):
+    """Record data-plane requests without high-cardinality request attributes."""
+    if request.url.path.startswith(GATEWAY_CONTROL_PREFIX):
+        return await call_next(request)
+
+    started_at = perf_counter()
+    status_code = 500
+    simulation_outcome = None
+    try:
+        response = await call_next(request)
+        status_code = response.status_code
+        simulation_outcome = response.headers.get("X-Simulation-Decision")
+        return response
+    finally:
+        request.app.state.gateway_metrics.record(
+            method=request.method,
+            status_code=status_code,
+            simulation_outcome=simulation_outcome,
+            duration_seconds=perf_counter() - started_at,
+        )
 
 
 def gateway_headers(
