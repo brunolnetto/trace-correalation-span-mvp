@@ -495,6 +495,8 @@ class PostgresOrderSagaRepository:
             "failure_category": record["failure_category"],
             "last_error": record["last_error"],
             "recovery_attempts": record["recovery_attempts"],
+            "reservation_id": record["context"].get("reservation_id"),
+            "payment_id": record["context"].get("payment_id"),
             "steps": [
                 {
                     "step_name": step["step_name"],
@@ -576,7 +578,10 @@ class PostgresPaymentGateway:
                     should_decline = True
 
         if should_decline:
-            raise PaymentDeclined("Payment was declined by the demo gateway")
+            raise PaymentDeclined(
+                "Payment was declined by the demo gateway",
+                payment_id=payment_id,
+            )
         return payment_id
 
     async def refund(self, payment_id: str) -> None:
@@ -698,6 +703,9 @@ class DurableOrderExecutor:
                 try:
                     result = await action(context)
                 except Exception as exc:
+                    payment_id = getattr(exc, "payment_id", None)
+                    if payment_id:
+                        context["payment_id"] = payment_id
                     if self._is_definitive_failure(exc):
                         failure_category = self._failure_category(exc)
                         await self.repository.mark_step_failed(
