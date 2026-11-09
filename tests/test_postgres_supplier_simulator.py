@@ -293,8 +293,12 @@ async def test_concurrent_replenishment_evaluations_create_one_active_purchase_o
             ) as client_b,
         ):
             result_a, result_b = await asyncio.gather(
-                store_a.evaluate_replenishment(client_a, "evaluate-a", product_id=product_id),
-                store_b.evaluate_replenishment(client_b, "evaluate-b", product_id=product_id),
+                store_a.evaluate_replenishment(
+                    client_a, "evaluate-a", product_id=product_id
+                ),
+                store_b.evaluate_replenishment(
+                    client_b, "evaluate-b", product_id=product_id
+                ),
             )
 
         decisions = [result_a[0]["decision"], result_b[0]["decision"]]
@@ -342,7 +346,11 @@ async def test_receiving_po_recovers_across_supplier_restart_without_double_cred
     product_id = await _create_product(
         manager, f"SKU-SUPPLIER-RECEIVE-{failure_point.upper()}"
     )
-    inventory.add_product(product_id, f"SKU-SUPPLIER-RECEIVE-{failure_point.upper()}", on_hand=5)
+    inventory.add_product(
+        product_id,
+        f"SKU-SUPPLIER-RECEIVE-{failure_point.upper()}",
+        on_hand=5,
+    )
     await store.set_policy(
         ReorderPolicy(
             product_id=product_id,
@@ -458,8 +466,12 @@ async def test_cancelled_purchase_order_history_is_durable_and_replenishment_can
                 )
             )[0]
             first_id = first_decision["purchase_order"]["purchase_order_id"]
-            cancelled = await store.cancel_purchase_order(first_id, "cancel-correlation")
-            replayed_cancel = await store.cancel_purchase_order(first_id, "cancel-replay")
+            cancelled = await store.cancel_purchase_order(
+                first_id, "cancel-correlation"
+            )
+            replayed_cancel = await store.cancel_purchase_order(
+                first_id, "cancel-replay"
+            )
             assert cancelled["status"] == replayed_cancel["status"] == "cancelled"
 
             second_decision = (
