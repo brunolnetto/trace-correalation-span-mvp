@@ -12,7 +12,7 @@ from app.observability import configure_observability, correlation_id_context
 from app.persistence.config import DatabaseSettings
 from app.persistence.database import DatabaseManager
 from app.supplier_simulator.postgres_store import PostgresSupplierSimulation
-from app.security import authenticate_request
+from app.security import authenticate_request, service_authorization_headers
 from app.supplier_simulator.store import (
     AdvanceClockRequest,
     ReorderPolicy,
@@ -56,8 +56,15 @@ app = FastAPI(
 configure_observability(app, os.getenv("SERVICE_NAME", "supplier-simulator"))
 
 
-def inventory_client() -> httpx.AsyncClient:
-    return httpx.AsyncClient(base_url=INVENTORY_API_URL, timeout=5.0)
+@asynccontextmanager
+async def inventory_client(*scopes: str) -> AsyncIterator[httpx.AsyncClient]:
+    headers = await service_authorization_headers(*scopes)
+    async with httpx.AsyncClient(
+        base_url=INVENTORY_API_URL,
+        timeout=5.0,
+        headers=headers,
+    ) as client:
+        yield client
 
 
 def correlation_id() -> str:
@@ -94,7 +101,7 @@ async def list_supplier_offerings():
 @app.post("/supplier-catalog/{supplier_sku}/onboard", tags=["supplier"], dependencies=[Security(authenticate_request, scopes=["suppliers:manage"])])
 async def onboard_supplier_product(supplier_sku: str):
     try:
-        async with inventory_client() as client:
+        async with inventory_client("catalog:read", "catalog:write") as client:
             result = await simulation.onboard_product(
                 supplier_sku, client, correlation_id()
             )
@@ -124,7 +131,7 @@ async def list_reorder_policies():
 @app.put("/reorder-policies", tags=["replenishment"], dependencies=[Security(authenticate_request, scopes=["suppliers:manage"])])
 async def upsert_reorder_policy(policy: ReorderPolicy):
     try:
-        async with inventory_client() as client:
+        async with inventory_client("catalog:read") as client:
             response = await client.get(
                 f"/products/{policy.product_id}",
                 headers={"X-Correlation-ID": correlation_id()},
@@ -157,7 +164,7 @@ async def evaluate_replenishment(
     product_id: int | None = Query(default=None, gt=0)
 ):
     try:
-        async with inventory_client() as client:
+        async with inventory_client("inventory:read") as client:
             decisions = await simulation.evaluate_replenishment(
                 client, correlation_id(), product_id=product_id
             )
@@ -251,7 +258,7 @@ async def order_purchase_order(purchase_order_id: str):
 , dependencies=[Security(authenticate_request, scopes=["suppliers:manage"])])
 async def receive_purchase_order(purchase_order_id: str):
     try:
-        async with inventory_client() as client:
+        async with inventory_client("inventory:receive") as client:
             result = await simulation.receive_purchase_order(
                 purchase_order_id, client, correlation_id()
             )
