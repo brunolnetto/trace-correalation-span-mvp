@@ -157,6 +157,61 @@ async def test_valid_scope_is_accepted(oidc_environment, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_service_token_request_uses_only_requested_oauth_scopes(
+    oidc_environment, monkeypatch
+):
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "access_token": "scoped-service-token",
+                "token_type": "Bearer",
+                "expires_in": 120,
+            }
+
+    class FakeAsyncClient:
+        def __init__(self, **kwargs):
+            captured["client_options"] = kwargs
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return False
+
+        async def post(self, url, *, data, auth, headers):
+            captured.update(
+                {
+                    "url": url,
+                    "data": data,
+                    "auth": auth,
+                    "headers": headers,
+                }
+            )
+            return FakeResponse()
+
+    monkeypatch.setattr(security.httpx, "AsyncClient", FakeAsyncClient)
+    settings = security.AuthSettings.from_env()
+    token, expires_at = await security._request_service_token(
+        settings,
+        frozenset({"inventory:reserve", "events:ingest"}),
+    )
+
+    assert token == "scoped-service-token"
+    assert expires_at > time.monotonic()
+    assert captured["data"] == {
+        "grant_type": "client_credentials",
+        "scope": "events:ingest inventory:reserve",
+    }
+    assert captured["auth"] == ("inventory-api", "not-a-real-secret")
+    assert captured["client_options"]["follow_redirects"] is False
+
+
+@pytest.mark.asyncio
 async def test_service_client_credentials_are_cached_and_scope_limited(
     oidc_environment, monkeypatch
 ):
