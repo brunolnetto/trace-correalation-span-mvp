@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from opentelemetry.metrics import Meter
+from opentelemetry.sdk.metrics.view import (
+    ExplicitBucketHistogramAggregation,
+    View,
+)
 
 HTTP_METHODS = frozenset(
     {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT"}
@@ -47,6 +51,30 @@ def metric_attributes(
         "http.response.status_code": status_code,
         "gateway.simulation.outcome": outcome,
     }
+
+
+GATEWAY_REQUEST_DURATION_BUCKETS_SECONDS = (
+    0.001,  # 1 ms
+    0.005,  # 5 ms
+    0.010,  # 10 ms
+    0.025,  # 25 ms
+    0.050,  # 50 ms
+    0.100,  # 100 ms
+    0.250,  # 250 ms
+    0.500,  # 500 ms
+    1.0,
+    2.5,
+    5.0,
+)
+GATEWAY_METRIC_VIEWS = (
+    View(
+        instrument_name="gateway.request.duration",
+        meter_name="app.gateway_simulator",
+        aggregation=ExplicitBucketHistogramAggregation(
+            boundaries=GATEWAY_REQUEST_DURATION_BUCKETS_SECONDS,
+        ),
+    ),
+)
 
 
 class GatewayMetrics:
