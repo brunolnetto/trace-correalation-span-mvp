@@ -307,9 +307,8 @@ async def test_supplier_state_survives_process_restarts_and_receipt_response_los
             # Bypass the application lock and prove the partial unique index
             # itself rejects a second active PO for the same product.
             with psycopg.connect(isolated_postgres_schema) as connection:
-                with pytest.raises(psycopg.errors.UniqueViolation):
-                    with connection.transaction():
-                        connection.execute(
+                with pytest.raises(psycopg.errors.UniqueViolation), connection.transaction():
+                    connection.execute(
                             """
                             INSERT INTO supplier_purchase_orders (
                                 purchase_order_id, product_id, supplier_sku,
@@ -328,9 +327,8 @@ async def test_supplier_state_survives_process_restarts_and_receipt_response_los
 
                 with pytest.raises(
                     psycopg.errors.RaiseException, match="append-only"
-                ):
-                    with connection.transaction():
-                        connection.execute(
+                ), connection.transaction():
+                    connection.execute(
                             """
                             UPDATE supplier_purchase_order_transitions
                             SET details = '{}'::jsonb
@@ -341,9 +339,8 @@ async def test_supplier_state_survives_process_restarts_and_receipt_response_los
 
                 with pytest.raises(
                     psycopg.errors.RaiseException, match="append-only"
-                ):
-                    with connection.transaction():
-                        connection.execute(
+                ), connection.transaction():
+                    connection.execute(
                             "TRUNCATE supplier_purchase_order_transitions"
                         )
 
