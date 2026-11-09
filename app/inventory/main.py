@@ -153,7 +153,8 @@ async def get_inventory(product_id: int):
     "/inventory/{product_id}/receipts",
     status_code=status.HTTP_201_CREATED,
     tags=["inventory"],
-, dependencies=[Security(authenticate_request, scopes=["inventory:receive"])])
+    dependencies=[Security(authenticate_request, scopes=["inventory:receive"])],
+)
 async def receive_inventory(product_id: int, request: InventoryReceiptRequest):
     with tracer.start_as_current_span("inventory.receive") as span:
         span.set_attribute("inventory.product_id", product_id)
@@ -185,7 +186,8 @@ async def receive_inventory(product_id: int, request: InventoryReceiptRequest):
     "/inventory/{product_id}/adjustments",
     status_code=status.HTTP_201_CREATED,
     tags=["inventory"],
-, dependencies=[Security(authenticate_request, scopes=["inventory:adjust"])])
+    dependencies=[Security(authenticate_request, scopes=["inventory:adjust"])],
+)
 async def adjust_inventory(
     product_id: int, request: InventoryAdjustmentRequest
 ):
@@ -273,7 +275,8 @@ async def reserve_inventory(
 @app.post(
     "/inventory/reservations/{reservation_id}/commit",
     tags=["inventory"],
-, dependencies=[Security(authenticate_request, scopes=["inventory:fulfill"])])
+    dependencies=[Security(authenticate_request, scopes=["inventory:fulfill"])],
+)
 async def commit_inventory_reservation(reservation_id: str):
     with tracer.start_as_current_span("inventory.commit") as span:
         span.set_attribute("inventory.reservation_id", reservation_id)
@@ -304,7 +307,8 @@ async def commit_inventory_reservation(reservation_id: str):
 @app.delete(
     "/inventory/reservations/{reservation_id}",
     tags=["inventory"],
-, dependencies=[Security(authenticate_request, scopes=["inventory:reserve"])])
+    dependencies=[Security(authenticate_request, scopes=["inventory:reserve"])],
+)
 async def release_inventory(reservation_id: str):
     with tracer.start_as_current_span("inventory.release") as span:
         span.set_attribute("inventory.reservation_id", reservation_id)
