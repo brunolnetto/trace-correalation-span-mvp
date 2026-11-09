@@ -19,14 +19,6 @@ from app.supplier_simulator.store import (
 )
 
 logger = logging.getLogger(__name__)
-app = FastAPI(
-    title="Supplier Simulation API",
-    description="Deterministic supplier catalog and inventory replenishment simulator.",
-    version="0.2.0",
-    lifespan=lifespan,
-)
-configure_observability(app, os.getenv("SERVICE_NAME", "supplier-simulator"))
-
 INVENTORY_API_URL = os.getenv(
     "INVENTORY_API_URL", "http://localhost:8001"
 )
@@ -52,6 +44,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         await database_manager.close()
+
+
+app = FastAPI(
+    title="Supplier Simulation API",
+    description="Deterministic supplier catalog and inventory replenishment simulator.",
+    version="0.2.0",
+    lifespan=lifespan,
+)
+configure_observability(app, os.getenv("SERVICE_NAME", "supplier-simulator"))
 
 
 def inventory_client() -> httpx.AsyncClient:
