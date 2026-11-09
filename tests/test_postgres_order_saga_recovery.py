@@ -13,6 +13,7 @@ from psycopg import sql
 from app.inventory.postgres_store import PostgresInventoryStore
 from app.inventory.store import InventoryReservationRequest
 from app.order.durable import (
+    CompensationIncomplete,
     DurableOrderExecutor,
     DurableOrderFailure,
     PostgresOrderSagaRepository,
@@ -876,3 +877,72 @@ async def test_real_inventory_release_is_idempotent_after_compensation_restart(
         assert reserve_step["compensation_status"] == "completed"
     finally:
         await restarted_database.close()
+
+class FailedInventoryCompensationSaga(PostgresInventoryOrderSaga):
+    async def release_inventory(self, context: dict) -> None:
+        raise RuntimeError("simulated Inventory release failure")
+
+
+@pytest.mark.asyncio
+async def test_failed_compensation_is_visible_for_reconciliation(
+    isolated_postgres_schema,
+):
+    database_url, product_id = isolated_postgres_schema
+    order_id = 910009
+    context = _context(order_id, product_id)
+
+    database = await _open_database(database_url)
+    repository = PostgresOrderSagaRepository(database)
+    gateway = PostgresPaymentGateway(database)
+    inventory = PostgresInventoryStore(database)
+    record = await repository.start_or_load(context)
+
+    with pytest.raises(CompensationIncomplete) as raised:
+        await DurableOrderExecutor(repository, gateway).execute(
+            FailedInventoryCompensationSaga(
+                inventory,
+                gateway,
+                fail_payment=True,
+            ),
+            tracker=None,
+            record=record,
+        )
+
+    assert raised.value.steps == ["reserve_inventory"]
+    recovery = await repository.get_recovery_view(order_id)
+    assert recovery is not None
+    assert recovery["status"] == "reconciliation_required"
+    assert recovery["reservation_id"]
+    assert recovery["last_error"] == (
+        "RuntimeError: simulated Inventory release failure"
+    )
+    reserve_step = next(
+        step for step in recovery["steps"]
+        if step["step_name"] == "reserve_inventory"
+    )
+    assert reserve_step["forward_status"] == "completed"
+    assert reserve_step["compensation_status"] == "failed"
+    assert reserve_step["compensation_error"] == (
+        "simulated Inventory release failure"
+    )
+
+    assert all(
+        candidate["saga_id"] != context["saga_id"]
+        for candidate in await repository.list_recoverable()
+    )
+    async with database.connection() as connection:
+        cursor = await connection.execute(
+            """
+            SELECT o.status, b.reserved
+            FROM orders AS o
+            JOIN inventory_balances AS b
+                ON b.product_id = o.product_id
+            WHERE o.order_id = %s
+            """,
+            (order_id,),
+        )
+        order = await cursor.fetchone()
+        assert order["status"] == "compensation_incomplete"
+        assert order["reserved"] == context["quantity"]
+    await database.close()
+
