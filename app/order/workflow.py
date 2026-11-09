@@ -150,6 +150,27 @@ class CompensationTracker(SagaListener):
         self._completed.add(step_name)
         self._last_context = dict(ctx)
 
+    def record_compensation_start(
+        self, step_name: str, ctx: dict[str, Any]
+    ) -> None:
+        """Record a durable coordinator's compensation start."""
+        self._started.add(step_name)
+        self._last_context = dict(ctx)
+
+    def record_compensation_complete(
+        self, step_name: str, ctx: dict[str, Any]
+    ) -> None:
+        """Record a durable coordinator's compensation completion."""
+        self._completed.add(step_name)
+        self._last_context = dict(ctx)
+
+    def record_compensation_failure(
+        self, step_name: str, ctx: dict[str, Any]
+    ) -> None:
+        """Keep a failed compensation visible as incomplete."""
+        self._started.add(step_name)
+        self._last_context = dict(ctx)
+
     @property
     def last_context(self) -> dict[str, Any]:
         """Return the most recent context seen by a compensation callback."""
@@ -164,6 +185,15 @@ class OrderProcessingSaga(Saga):
     """Coordinates inventory reservation, payment and order confirmation."""
 
     saga_name = "order-processing"
+
+    def __init__(
+        self,
+        *,
+        config: SagaConfig | None = None,
+        payment_adapter: Any | None = None,
+    ) -> None:
+        self.payment_adapter = payment_adapter or payment_gateway
+        super().__init__(config=config)
 
     @action("reserve_inventory", timeout_seconds=10, max_retries=0)
     async def reserve_inventory(self, ctx: dict[str, Any]) -> dict[str, Any]:
@@ -200,14 +230,14 @@ class OrderProcessingSaga(Saga):
         max_retries=0,
     )
     async def charge_payment(self, ctx: dict[str, Any]) -> dict[str, str]:
-        payment_id = await payment_gateway.charge(ctx)
+        payment_id = await self.payment_adapter.charge(ctx)
         return {"payment_id": payment_id}
 
     @compensate("charge_payment", timeout_seconds=10, max_retries=0)
     async def refund_payment(self, ctx: dict[str, Any]) -> None:
         payment_id = ctx.get("payment_id")
         if payment_id:
-            await payment_gateway.refund(payment_id)
+            await self.payment_adapter.refund(payment_id)
 
     @action(
         "confirm_order",
@@ -219,7 +249,9 @@ class OrderProcessingSaga(Saga):
         return await persist_order(ctx)
 
 
-def create_order_processing_saga() -> tuple[OrderProcessingSaga, CompensationTracker]:
+def create_order_processing_saga(
+    payment_adapter: Any | None = None,
+) -> tuple[OrderProcessingSaga, CompensationTracker]:
     """Create an isolated saga instance and its per-execution listener."""
     tracker = CompensationTracker()
     config = SagaConfig(
@@ -227,4 +259,7 @@ def create_order_processing_saga() -> tuple[OrderProcessingSaga, CompensationTra
         metrics=False,
         tracing=False,
     )
-    return OrderProcessingSaga(config=config), tracker
+    return OrderProcessingSaga(
+        config=config,
+        payment_adapter=payment_adapter,
+    ), tracker
