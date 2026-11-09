@@ -6,22 +6,12 @@ KCADM="/opt/keycloak/bin/kcadm.sh"
 REALM="trace-local"
 SERVER="http://keycloak:8080"
 
-configured=0
-attempt=0
-while (( attempt < 60 )); do
-  if "$KCADM" config credentials \
-    --server "$SERVER" \
-    --realm master \
-    --user "$KC_BOOTSTRAP_ADMIN_USERNAME" \
-    --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null 2>&1; then
-    configured=1
-    break
-  fi
-  attempt=$((attempt + 1))
-  sleep 2
-done
-if (( ! configured )); then
-  echo "Keycloak did not become ready for administrative provisioning" >&2
+if ! "$KCADM" config credentials \
+  --server "$SERVER" \
+  --realm master \
+  --user "$KC_BOOTSTRAP_ADMIN_USERNAME" \
+  --password "$KC_BOOTSTRAP_ADMIN_PASSWORD"; then
+  echo "Keycloak administrative authentication failed after readiness check" >&2
   exit 1
 fi
 
@@ -72,16 +62,13 @@ ensure_scope() {
 
   if [[ -n "$scope_id" ]]; then
     if ! "$KCADM" update "client-scopes/$scope_id" -r "$REALM" -f "$json_file"; then
-      rm -f "$json_file"
       return 1
     fi
   else
     if ! "$KCADM" create client-scopes -r "$REALM" -f "$json_file"; then
-      rm -f "$json_file"
       return 1
     fi
   fi
-  rm -f "$json_file"
 }
 
 ensure_client() {
@@ -135,16 +122,13 @@ ensure_client() {
 
   if [[ -n "$client_uuid" ]]; then
     if ! "$KCADM" update "clients/$client_uuid" -r "$REALM" -f "$json_file"; then
-      rm -f "$json_file"
       return 1
     fi
   else
     if ! "$KCADM" create clients -r "$REALM" -f "$json_file"; then
-      rm -f "$json_file"
       return 1
     fi
   fi
-  rm -f "$json_file"
 }
 
 for scope in $ALL_SCOPES; do
