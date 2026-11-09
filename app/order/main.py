@@ -179,6 +179,17 @@ async def persist_order_outcome(record: dict) -> None:
 async def process_order(order_id: int, request: ProcessOrderRequest):
     """Run or resume the durable Order Saga, compensating deterministic failures."""
     correlation_id = correlation_id_context.get() or ""
+    try:
+        # Acquire the downstream permission before creating or mutating durable
+        # Saga state, so an IdP outage cannot leave a false failed execution.
+        await service_authorization_headers("inventory:reserve")
+    except RuntimeError:
+        logger.exception("order.process.inventory_authentication.preflight_failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Inventory service authentication is temporarily unavailable.",
+        ) from None
+
     existing = (
         await durable_order_executor.get_by_order(order_id)
         if durable_order_executor is not None
@@ -538,6 +549,12 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
             raise HTTPException(
                 status_code=503,
                 detail="Inventory service is temporarily unavailable.",
+            ) from None
+
+        if isinstance(exc, RuntimeError):
+            raise HTTPException(
+                status_code=503,
+                detail="Inventory service authentication is temporarily unavailable.",
             ) from None
 
         if isinstance(exc, TimeoutError):
