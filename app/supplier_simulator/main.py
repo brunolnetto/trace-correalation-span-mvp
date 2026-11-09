@@ -11,12 +11,12 @@ from fastapi import FastAPI, HTTPException, Query
 from app.observability import configure_observability, correlation_id_context
 from app.persistence.config import DatabaseSettings
 from app.persistence.database import DatabaseManager
+from app.supplier_simulator.postgres_store import PostgresSupplierSimulation
 from app.supplier_simulator.store import (
     AdvanceClockRequest,
     ReorderPolicy,
     SupplierSimulation,
 )
-from app.supplier_simulator.postgres_store import PostgresSupplierSimulation
 
 logger = logging.getLogger(__name__)
 INVENTORY_API_URL = os.getenv(
@@ -204,6 +204,7 @@ async def get_purchase_order(purchase_order_id: str):
         raise HTTPException(
             status_code=404, detail="Purchase order not found."
         ) from None
+
 
 @app.get("/purchase-orders/{purchase_order_id}/transitions", tags=["supplier"])
 async def list_purchase_order_transitions(purchase_order_id: str):
