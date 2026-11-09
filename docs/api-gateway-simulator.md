@@ -95,9 +95,31 @@ policy snapshot it observed at admission. Policy and audit state reset on restar
 - The first implementation buffers request and response bodies in memory.
 - The control surface is unauthenticated and must remain bound to localhost in
   this local-only environment. Do not expose it to an untrusted network.
-- Runtime counters are process-local snapshots, not durable metrics. Traces and
-  structured logs flow through the existing OpenTelemetry Collector, Jaeger,
-  and Loki services.
+- Runtime counters exposed by /_simulator/stats are process-local snapshots;
+  they are separate from exported OpenTelemetry metrics.
+- The gateway exports OTLP metrics over HTTP to the existing Collector at
+  /v1/metrics. The Collector receives the metrics pipeline and writes its
+  debug exporter output to its own logs. No Prometheus or additional monitoring
+  service is required or provisioned by this simulator.
 
-Correlation IDs, trace IDs, span IDs, raw paths, and request keys must not be
-used as metric labels. Keep request-specific identifiers in logs and traces.
+## Gateway metrics
+
+The gateway records two data-plane instruments:
+
+| Instrument | Type | Unit | Meaning |
+|---|---|---|---|
+| gateway.requests | Counter | {request} | Requests handled by the gateway |
+| gateway.request.duration | Histogram | s | End-to-end gateway request duration |
+
+Both instruments use the same bounded attributes:
+
+- http.request.method: standard method names; unknown methods become _OTHER.
+- http.response.status_code: the numeric HTTP response status.
+- gateway.simulation.outcome: a fixed set including forwarded, rate_limited,
+  overloaded, injected failures, upstream failures, and status-class fallbacks.
+
+Control endpoints under /_simulator are excluded. Paths, route IDs, correlation
+IDs, trace IDs, span IDs, and simulation request IDs are never metric attributes.
+The gateway service configures the endpoint with
+OTEL_EXPORTER_OTLP_METRICS_ENDPOINT; the Compose stack points it at the existing
+Collector HTTP receiver.
