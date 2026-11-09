@@ -795,6 +795,18 @@ async def test_supplier_api_process_restart_recovers_receipt_without_double_cred
                 item["to_status"] for item in history_response.json()
             ] == ["created", "ordered", "receiving", "received"]
 
+            # The next decision must use Inventory's post-receipt balance and
+            # the persisted PO state, not the stale pre-receipt snapshot.
+            post_receipt = await restarted_client.post(
+                "/replenishments/evaluate",
+                params={"product_id": product_id},
+            )
+            assert post_receipt.status_code == 200
+            decision = post_receipt.json()["decisions"][0]
+            assert decision["decision"] == "no_reorder"
+            assert decision["inventory_position"] == 12
+            assert decision["purchase_order_ids"] == []
+
         assert inventory_state["balance"] == {"on_hand": 12, "reserved": 0}
         assert inventory_state["receipt_calls"] == 2
     finally:
