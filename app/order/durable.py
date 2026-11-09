@@ -191,7 +191,7 @@ class PostgresOrderSagaRepository:
                 (saga_id, order_id, fingerprint, _json_dump(context)),
             )
             record = await cursor.fetchone()
-            for step_name, compensation_name in FORWARD_STEPS:
+            for step_name, _compensation_name in FORWARD_STEPS:
                 await connection.execute(
                     """
                     INSERT INTO order_saga_steps (
@@ -813,6 +813,16 @@ class DurableOrderExecutor:
             except DurableOrderFailure:
                 recovered += 1
             except Exception:
+                latest = await self.repository.get(record["saga_id"])
+                if latest and latest["status"] in {
+                    "completed",
+                    "rolled_back",
+                    "reconciliation_required",
+                }:
+                    # A business rejection is a successfully recovered terminal
+                    # outcome, even though execute() re-raises it to API callers.
+                    recovered += 1
+                    continue
                 failed += 1
                 logger.exception(
                     "order.saga.recovery_failed",
