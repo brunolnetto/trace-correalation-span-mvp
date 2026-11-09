@@ -60,10 +60,11 @@ ensure_scope() {
     fi
     if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
       current_id="${BASH_REMATCH[1]}"
-    elif [[ "$line" =~ \"name\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
+    fi
+    if [[ "$line" =~ \"name\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
       current_name="${BASH_REMATCH[1]}"
     fi
-    if [[ "$current_id" && "$current_name" == "$scope" ]]; then
+    if [[ -n "$current_id" && "$current_name" == "$scope" ]]; then
       scope_id="$current_id"
       break
     fi
