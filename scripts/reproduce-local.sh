@@ -187,6 +187,38 @@ print(token)
 PY
 )"
 
+echo "    verifying unauthenticated and insufficient-scope requests"
+UNAUTHENTICATED_STATUS="$(curl --silent --show-error \
+  --output /dev/null \
+  --write-out '%{http_code}' \
+  "$INVENTORY_URL/products")"
+[[ "$UNAUTHENTICATED_STATUS" == "401" ]] || die "Expected unauthenticated Inventory request to return 401; received $UNAUTHENTICATED_STATUS"
+
+curl --ipv4 --silent --show-error --fail \
+  --user "local-developer:$LOCAL_DEVELOPER_CLIENT_SECRET" \
+  --data-urlencode "grant_type=client_credentials" \
+  --data-urlencode "scope=orders:read" \
+  "$KEYCLOAK_URL/realms/trace-local/protocol/openid-connect/token" \
+  > "$TMP_DIR/read-only-token.json"
+READ_ONLY_TOKEN="$(python3 - "$TMP_DIR/read-only-token.json" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+token = json.loads(Path(sys.argv[1]).read_text()).get("access_token")
+if not isinstance(token, str) or not token:
+    raise SystemExit("Keycloak did not return the read-only access token")
+print(token)
+PY
+)"
+INSUFFICIENT_SCOPE_STATUS="$(curl --silent --show-error \
+  --output /dev/null \
+  --write-out '%{http_code}' \
+  --header "Authorization: Bearer $READ_ONLY_TOKEN" \
+  "$INVENTORY_URL/products")"
+[[ "$INSUFFICIENT_SCOPE_STATUS" == "403" ]] || die "Expected insufficient-scope Inventory request to return 403; received $INSUFFICIENT_SCOPE_STATUS"
+echo "    authentication gates: 401 unauthenticated, 403 insufficient scope"
+
 echo "==> 5/7: Exercise catalog, orders, and supplier replenishment"
 api_curl --silent --show-error --fail \
   --header "Content-Type: application/json" \
