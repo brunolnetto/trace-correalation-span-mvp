@@ -93,7 +93,8 @@ class AuthSettings:
         mode = os.getenv("AUTH_MODE", "oidc").strip().lower()
         if mode == "test":
             if (
-                os.getenv("ENVIRONMENT", "development").lower() in {"production", "prod"}
+                os.getenv("ENVIRONMENT", "development").lower()
+                in {"production", "prod"}
                 or (
                     not os.getenv("PYTEST_CURRENT_TEST")
                     and "pytest" not in sys.modules
@@ -115,7 +116,9 @@ class AuthSettings:
                 cache_ttl_seconds=1,
             )
         if mode != "oidc":
-            raise RuntimeError("AUTH_MODE must be 'oidc'; insecure bypass modes are forbidden")
+            raise RuntimeError(
+                "AUTH_MODE must be 'oidc'; insecure bypass modes are forbidden"
+            )
 
         required = (
             "OIDC_ISSUER",
@@ -365,7 +368,11 @@ async def authenticate_request(
         raise HTTPException(
             status_code=403,
             detail="Insufficient scope",
-            headers={"WWW-Authenticate": f'Bearer error="insufficient_scope", scope="{required}"'},
+            headers={
+                "WWW-Authenticate": (
+                    f'Bearer error="insufficient_scope", scope="{required}"'
+                )
+            },
         )
     return principal
 
@@ -406,7 +413,9 @@ async def _request_service_token(
     ):
         raise RuntimeError("Identity provider returned an invalid service token")
     if expires_in <= 0:
-        raise RuntimeError("Identity provider returned a service token without a valid expiry")
+        raise RuntimeError(
+            "Identity provider returned a service token without a valid expiry"
+        )
     return access_token, time.monotonic() + max(0, expires_in - 30)
 
 
