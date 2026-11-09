@@ -397,6 +397,21 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
             if incomplete_compensations
             else failure_category
         )
+        failure_context = dict(saga_context)
+        if durable_order_executor is not None:
+            try:
+                latest_execution = await durable_order_executor.get_by_order(
+                    order_id
+                )
+            except Exception:
+                latest_execution = None
+                logger.exception(
+                    "order.saga.failure_context_load_failed",
+                    extra={"order_id": order_id, "saga_id": saga_id},
+                )
+            if latest_execution is not None:
+                failure_context.update(latest_execution["context"])
+            failure_context.update(compensation_tracker.last_context)
 
         try:
             await persist_order_outcome(
@@ -408,11 +423,11 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
                     "unit_price": unit_price,
                     "total_amount": amount,
                     "saga_id": saga_id,
-                    "reservation_id": saga_context.get("reservation_id"),
-                    "payment_id": saga_context.get("payment_id"),
+                    "reservation_id": failure_context.get("reservation_id"),
+                    "payment_id": failure_context.get("payment_id"),
                     "status": outcome_status,
                     "failure_category": failure_category,
-                    "correlation_id": saga_context.get(
+                    "correlation_id": failure_context.get(
                         "correlation_id", correlation_id
                     ),
                 }
