@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from time import perf_counter
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from time import perf_counter
 from uuid import uuid4
 
 import httpx
