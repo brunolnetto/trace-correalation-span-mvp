@@ -36,6 +36,11 @@ CREATE TABLE outbox_events (
         (status = 'blocked' AND blocked_at IS NOT NULL)
         OR
         (status <> 'blocked' AND blocked_at IS NULL)
+    ),
+    CONSTRAINT outbox_envelope_identity_check CHECK (
+        COALESCE(event_payload->>'event_id' = event_id::TEXT, FALSE)
+        AND COALESCE(event_payload->>'event_name' = event_name, FALSE)
+        AND COALESCE(event_payload->>'service' = service, FALSE)
     )
 );
 
@@ -46,6 +51,41 @@ CREATE INDEX outbox_events_claim_idx
 CREATE INDEX outbox_events_blocked_idx
     ON outbox_events (created_at DESC, outbox_id)
     WHERE status = 'blocked';
+
+CREATE OR REPLACE FUNCTION protect_outbox_event_identity()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $
+BEGIN
+    IF ROW(
+        OLD.event_id,
+        OLD.event_name,
+        OLD.service,
+        OLD.aggregate_type,
+        OLD.aggregate_id,
+        OLD.correlation_id,
+        OLD.event_payload,
+        OLD.created_at
+    ) IS DISTINCT FROM ROW(
+        NEW.event_id,
+        NEW.event_name,
+        NEW.service,
+        NEW.aggregate_type,
+        NEW.aggregate_id,
+        NEW.correlation_id,
+        NEW.event_payload,
+        NEW.created_at
+    ) THEN
+        RAISE EXCEPTION 'Outbox event identity and payload are immutable'
+            USING ERRCODE = '55000';
+    END IF;
+    RETURN NEW;
+END;
+$;
+
+CREATE TRIGGER outbox_event_identity_immutable
+    BEFORE UPDATE ON outbox_events
+    FOR EACH ROW EXECUTE FUNCTION protect_outbox_event_identity();
 
 CREATE OR REPLACE FUNCTION enqueue_outbox_event(
     p_service TEXT,
