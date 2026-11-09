@@ -10,9 +10,9 @@ from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
+from fastapi.encoders import jsonable_encoder
 import httpx
 import psycopg
-from fastapi.encoders import jsonable_encoder
 import pytest
 from psycopg import sql
 from psycopg.types.json import Jsonb
