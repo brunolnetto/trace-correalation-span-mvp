@@ -286,7 +286,7 @@ async def test_receipt_retry_is_safe_when_inventory_commits_but_response_is_lost
         )
 
     pending = await simulation.get_purchase_order(purchase_order_id)
-    assert pending["status"] == "ordered"
+    assert pending["status"] == "receiving"
     assert inventory_double.balances[1]["on_hand"] == 12
 
     # Retrying the same PO uses the same idempotency key. Inventory returns
