@@ -36,6 +36,7 @@ ensure_client() {
   local client="$1"
   local secret="$2"
   local scopes="$3"
+  local audiences="$4"
   local json_file client_uuid clients_json line
 
   json_file="/tmp/keycloak-client-${client}-$.json"
@@ -57,7 +58,7 @@ ensure_client() {
     printf '    {"name":"api-scope-claim","protocol":"openid-connect","protocolMapper":"oidc-hardcoded-claim-mapper","consentRequired":false,"config":{"claim.name":"scope","claim.value":"%s","jsonType.label":"String","access.token.claim":"true","introspection.token.claim":"true","id.token.claim":"false","userinfo.token.claim":"false"}},\n' "$scopes"
 
     local first=1 audience
-    for audience in $ALL_AUDIENCES; do
+    for audience in $audiences; do
       if (( first )); then first=0; else printf ',\n'; fi
       printf '    {"name":"audience-%s","protocol":"openid-connect","protocolMapper":"oidc-audience-mapper","consentRequired":false,"config":{"included.client.audience":"%s","id.token.claim":"false","access.token.claim":"true","introspection.token.claim":"true"}}' "$audience" "$audience"
     done
@@ -89,19 +90,26 @@ ensure_client() {
 }
 
 ensure_client order-api "$ORDER_API_CLIENT_SECRET" \
-  "catalog:read inventory:read inventory:reserve inventory:fulfill events:ingest"
+  "catalog:read inventory:read inventory:reserve inventory:fulfill events:ingest" \
+  "inventory-api event-collector"
 ensure_client inventory-api "$INVENTORY_API_CLIENT_SECRET" \
-  "events:ingest"
+  "events:ingest" \
+  "event-collector"
 ensure_client supplier-simulator "$SUPPLIER_SIMULATOR_CLIENT_SECRET" \
-  "catalog:read catalog:write inventory:read inventory:receive events:ingest"
+  "catalog:read catalog:write inventory:read inventory:receive events:ingest" \
+  "inventory-api event-collector"
 ensure_client event-collector "$EVENT_COLLECTOR_CLIENT_SECRET" \
-  "events:ingest"
+  "events:ingest" \
+  ""
 ensure_client outbox-dispatcher "$OUTBOX_DISPATCHER_CLIENT_SECRET" \
-  "events:ingest"
+  "events:ingest" \
+  "event-collector"
 ensure_client order-generator "$ORDER_GENERATOR_CLIENT_SECRET" \
-  "orders:process events:ingest"
+  "orders:process events:ingest" \
+  "order-api event-collector"
 ensure_client standalone-runner "$STANDALONE_RUNNER_CLIENT_SECRET" \
-  "catalog:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest events:read"
-ensure_client local-developer "$LOCAL_DEVELOPER_CLIENT_SECRET" "$ALL_SCOPES"
+  "catalog:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest events:read" \
+  "inventory-api order-api supplier-simulator event-collector"
+ensure_client local-developer "$LOCAL_DEVELOPER_CLIENT_SECRET" "$ALL_SCOPES" "$ALL_AUDIENCES"
 
 echo "Configured local OIDC realm '$REALM' and independent service clients."
