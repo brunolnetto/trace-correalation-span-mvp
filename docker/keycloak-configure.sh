@@ -107,7 +107,7 @@ ensure_client() {
     printf '  "standardFlowEnabled": false,\n'
     printf '  "directAccessGrantsEnabled": false,\n'
     printf '  "implicitFlowEnabled": false,\n'
-    printf '  "optionalClientScopes": ['
+    printf '  "defaultOptionalClientScopes": ['
     local first=1 scope
     for scope in $scopes; do
       if (( first )); then first=0; else printf ', '; fi
@@ -181,7 +181,7 @@ ensure_browser_client() {
     printf '    "http://localhost:%s",\n' "$SUPPLIER_HOST_PORT"
     printf '    "http://localhost:%s"\n' "$EVENT_COLLECTOR_HOST_PORT"
     printf '  ],\n'
-    printf '  "optionalClientScopes": ['
+    printf '  "defaultOptionalClientScopes": ['
     local first=1 scope
     for scope in $ALL_SCOPES; do
       if (( first )); then first=0; else printf ', '; fi
