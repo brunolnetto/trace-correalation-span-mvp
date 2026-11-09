@@ -499,3 +499,137 @@ async def test_transient_errors_retry_and_permanent_rejections_are_blocked(
         assert [str(row["event_id"]) for row in blocked_records] == [blocked_id]
     finally:
         await database.close()
+
+
+@pytest.mark.asyncio
+async def test_committed_domain_event_survives_producer_restart_before_dispatch(
+    outbox_database_url: str,
+) -> None:
+    producer_database = await open_database(outbox_database_url)
+    correlation_id = "550e8400-e29b-41d4-a716-446655440903"
+    token = correlation_id_context.set(correlation_id)
+    try:
+        product = await PostgresInventoryStore(producer_database).create_product(
+            ProductCreate(
+                sku="OUTBOX-RESTART-001",
+                name="Committed before dispatcher restart",
+                category="test",
+                unit_price=Decimal("14.50"),
+            )
+        )
+        product_id = product["product_id"]
+    finally:
+        correlation_id_context.reset(token)
+        await producer_database.close()
+
+    # A new pool represents the producer process starting again. The outbox
+    # event must already be committed even though no dispatch was attempted.
+    dispatcher_database = await open_database(outbox_database_url)
+    try:
+        rows = await outbox_rows(dispatcher_database)
+        created = next(
+            row
+            for row in rows
+            if row["event_name"] == "product.created"
+            and row["event_payload"]["attributes"]["product_id"] == product_id
+        )
+        assert created["status"] == "pending"
+        persisted = RawEvent.model_validate(created["event_payload"])
+        assert persisted.correlation_id == correlation_id
+        assert persisted.event_id == created["event_id"]
+
+        delivered_ids: list[str] = []
+
+        def collector(request: httpx.Request) -> httpx.Response:
+            event = json.loads(request.content)["events"][0]
+            delivered_ids.append(event["event_id"])
+            return httpx.Response(
+                202,
+                json={
+                    "accepted": 1,
+                    "duplicates": 0,
+                    "quarantined": 0,
+                },
+            )
+
+        dispatcher = OutboxDispatcher(
+            PostgresOutboxRepository(dispatcher_database),
+            collector_url="http://collector.test",
+            batch_size=10,
+            base_backoff_seconds=0,
+            max_backoff_seconds=0,
+            transport=httpx.MockTransport(collector),
+            worker_id="worker-after-producer-restart",
+        )
+        result = await dispatcher.dispatch_once()
+        assert result["delivered"] == 1
+        assert delivered_ids == [str(persisted.event_id)]
+
+        rows = await outbox_rows(dispatcher_database)
+        delivered = next(row for row in rows if row["outbox_id"] == created["outbox_id"])
+        assert delivered["status"] == "delivered"
+    finally:
+        await dispatcher_database.close()
+
+
+@pytest.mark.asyncio
+async def test_transport_failure_retries_same_event_and_correlation(
+    outbox_database_url: str,
+) -> None:
+    database = await open_database(outbox_database_url)
+    correlation_id = "550e8400-e29b-41d4-a716-446655440904"
+    token = correlation_id_context.set(correlation_id)
+    try:
+        expected_id = await insert_outbox_event(
+            database,
+            name="test.transport-retry",
+            aggregate_id="transport-retry-aggregate",
+        )
+    finally:
+        correlation_id_context.reset(token)
+
+    try:
+        requests: list[dict[str, Any]] = []
+
+        def collector(request: httpx.Request) -> httpx.Response:
+            event = json.loads(request.content)["events"][0]
+            requests.append(event)
+            if len(requests) == 1:
+                raise httpx.ConnectError(
+                    "simulated connection failure before Collector persistence",
+                    request=request,
+                )
+            return httpx.Response(
+                202,
+                json={
+                    "accepted": 1,
+                    "duplicates": 0,
+                    "quarantined": 0,
+                },
+            )
+
+        dispatcher = OutboxDispatcher(
+            PostgresOutboxRepository(database),
+            collector_url="http://collector.test",
+            batch_size=1,
+            base_backoff_seconds=0,
+            max_backoff_seconds=0,
+            transport=httpx.MockTransport(collector),
+            worker_id="worker-transport-retry",
+        )
+        first = await dispatcher.dispatch_once()
+        second = await dispatcher.dispatch_once()
+
+        assert first["retried"] == 1
+        assert second["delivered"] == 1
+        assert len(requests) == 2
+        assert requests[0] == requests[1]
+        assert requests[0]["event_id"] == expected_id
+        assert requests[0]["correlation_id"] == correlation_id
+
+        rows = await outbox_rows(database)
+        assert len(rows) == 1
+        assert rows[0]["status"] == "delivered"
+        assert rows[0]["attempts"] == 2
+    finally:
+        await database.close()
