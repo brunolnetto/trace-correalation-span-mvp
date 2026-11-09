@@ -1,4 +1,47 @@
 services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.6.2
+    command: ["start-dev", "--health-enabled=true"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-local-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Run scripts/prepare-dev-env.sh before starting Compose}
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+    ports:
+      - "127.0.0.1:${KEYCLOAK_HOST_PORT:-18080}:8080"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  keycloak-config:
+    image: quay.io/keycloak/keycloak:26.6.2
+    entrypoint: ["/bin/bash", "/opt/keycloak/bootstrap/configure.sh"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-local-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Run scripts/prepare-dev-env.sh before starting Compose}
+      ORDER_API_CLIENT_SECRET: ${ORDER_API_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+      INVENTORY_API_CLIENT_SECRET: ${INVENTORY_API_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+      SUPPLIER_SIMULATOR_CLIENT_SECRET: ${SUPPLIER_SIMULATOR_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+      EVENT_COLLECTOR_CLIENT_SECRET: ${EVENT_COLLECTOR_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+      OUTBOX_DISPATCHER_CLIENT_SECRET: ${OUTBOX_DISPATCHER_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+      ORDER_GENERATOR_CLIENT_SECRET: ${ORDER_GENERATOR_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+      STANDALONE_RUNNER_CLIENT_SECRET: ${STANDALONE_RUNNER_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+      LOCAL_DEVELOPER_CLIENT_SECRET: ${LOCAL_DEVELOPER_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+    volumes:
+      - ./docker/keycloak-configure.sh:/opt/keycloak/bootstrap/configure.sh:ro
+    depends_on:
+      keycloak:
+        condition: service_started
+
+x-oidc-env: &oidc-env
+  AUTH_MODE: oidc
+  OIDC_ISSUER: http://keycloak:8080/realms/trace-local
+  OIDC_TOKEN_URL: http://keycloak:8080/realms/trace-local/protocol/openid-connect/token
+  OIDC_INTROSPECTION_URL: http://keycloak:8080/realms/trace-local/protocol/openid-connect/token/introspect
+  OIDC_TIMEOUT_SECONDS: "3"
+  OIDC_INTROSPECTION_CACHE_SECONDS: "10"
+
   postgres:
     image: postgres:16.6
     environment:
@@ -103,6 +146,11 @@ services:
       - --port
       - "8010"
     environment:
+      <<: *oidc-env
+      OIDC_AUDIENCE: event-collector
+      OIDC_CLIENT_ID: event-collector
+      OIDC_CLIENT_SECRET: ${EVENT_COLLECTOR_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+      OIDC_SERVICE_SCOPES: "events:ingest"
       SERVICE_NAME: event-collector
       EVENT_STORE_PATH: /data/events.jsonl
       EVENT_QUARANTINE_PATH: /data/quarantine.jsonl
@@ -125,6 +173,8 @@ services:
       retries: 12
       start_period: 5s
     depends_on:
+      keycloak-config:
+        condition: service_completed_successfully
       otel-collector:
         condition: service_started
 
@@ -138,6 +188,11 @@ services:
       - --port
       - "8011"
     environment:
+      <<: *oidc-env
+      OIDC_AUDIENCE: outbox-dispatcher
+      OIDC_CLIENT_ID: outbox-dispatcher
+      OIDC_CLIENT_SECRET: ${OUTBOX_DISPATCHER_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+      OIDC_SERVICE_SCOPES: "events:ingest"
       SERVICE_NAME: outbox-dispatcher
       PERSISTENCE_BACKEND: postgres
       DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-app}
@@ -166,6 +221,8 @@ services:
       retries: 12
       start_period: 5s
     depends_on:
+      keycloak-config:
+        condition: service_completed_successfully
       event-collector:
         condition: service_healthy
       postgres:
@@ -175,6 +232,11 @@ services:
     build: .
     command: ["uvicorn", "app.inventory.main:app", "--host", "0.0.0.0", "--port", "8001"]
     environment:
+      <<: *oidc-env
+      OIDC_AUDIENCE: inventory-api
+      OIDC_CLIENT_ID: inventory-api
+      OIDC_CLIENT_SECRET: ${INVENTORY_API_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+      OIDC_SERVICE_SCOPES: "events:ingest"
       SERVICE_NAME: inventory-api
       EVENT_COLLECTOR_URL: http://event-collector:8010
       INVENTORY_SEED_DEMO_DATA: "true"
@@ -199,6 +261,8 @@ services:
       retries: 12
       start_period: 5s
     depends_on:
+      keycloak-config:
+        condition: service_completed_successfully
       otel-collector:
         condition: service_started
       event-collector:
@@ -210,6 +274,11 @@ services:
     build: .
     command: ["uvicorn", "app.order.main:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
+      <<: *oidc-env
+      OIDC_AUDIENCE: order-api
+      OIDC_CLIENT_ID: order-api
+      OIDC_CLIENT_SECRET: ${ORDER_API_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+      OIDC_SERVICE_SCOPES: "catalog:read inventory:reserve inventory:fulfill events:ingest inventory:read"
       SERVICE_NAME: order-api
       EVENT_COLLECTOR_URL: http://event-collector:8010
       INVENTORY_API_URL: http://inventory-api:8001
@@ -234,6 +303,8 @@ services:
       retries: 12
       start_period: 5s
     depends_on:
+      keycloak-config:
+        condition: service_completed_successfully
       otel-collector:
         condition: service_started
       inventory-api:
@@ -253,6 +324,11 @@ services:
       - --port
       - "8002"
     environment:
+      <<: *oidc-env
+      OIDC_AUDIENCE: supplier-simulator
+      OIDC_CLIENT_ID: supplier-simulator
+      OIDC_CLIENT_SECRET: ${SUPPLIER_SIMULATOR_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+      OIDC_SERVICE_SCOPES: "catalog:read catalog:write inventory:read inventory:receive events:ingest"
       SERVICE_NAME: supplier-simulator
       EVENT_COLLECTOR_URL: http://event-collector:8010
       INVENTORY_API_URL: http://inventory-api:8001
@@ -277,6 +353,8 @@ services:
       retries: 12
       start_period: 5s
     depends_on:
+      keycloak-config:
+        condition: service_completed_successfully
       otel-collector:
         condition: service_started
       inventory-api:
@@ -289,6 +367,11 @@ services:
     profiles: ["standalone"]
     command: ["python", "-m", "app.standalone_runner"]
     environment:
+      <<: *oidc-env
+      OIDC_AUDIENCE: inventory-api
+      OIDC_CLIENT_ID: standalone-runner
+      OIDC_CLIENT_SECRET: ${STANDALONE_RUNNER_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+      OIDC_SERVICE_SCOPES: "catalog:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest"
       ORDER_API_URL: http://order-api:8000
       INVENTORY_API_URL: http://inventory-api:8001
       SUPPLIER_API_URL: http://supplier-simulator:8002
@@ -309,6 +392,8 @@ services:
     volumes:
       - run-state:/run-state
     depends_on:
+      keycloak-config:
+        condition: service_completed_successfully
       order-api:
         condition: service_healthy
       inventory-api:
@@ -325,6 +410,11 @@ services:
     profiles: ["simulation"]
     command: ["python", "-m", "app.order_generator"]
     environment:
+      <<: *oidc-env
+      OIDC_AUDIENCE: order-api
+      OIDC_CLIENT_ID: order-generator
+      OIDC_CLIENT_SECRET: ${ORDER_GENERATOR_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
+      OIDC_SERVICE_SCOPES: "orders:process events:ingest"
       ORDER_API_URL: http://order-api:8000
       EVENT_COLLECTOR_URL: http://event-collector:8010
       ORDER_GENERATOR_MODE: random
@@ -332,6 +422,8 @@ services:
       ORDER_GENERATOR_SEED: "20261106"
       ORDER_GENERATOR_PRODUCT_ID: "7"
     depends_on:
+      keycloak-config:
+        condition: service_completed_successfully
       order-api:
         condition: service_healthy
       event-collector:
@@ -387,6 +479,7 @@ services:
         condition: service_completed_successfully
 
 volumes:
+  keycloak-data:
   postgres-data:
   event-data:
   analytics-data:
