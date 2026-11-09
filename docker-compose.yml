@@ -374,7 +374,7 @@ services:
       OIDC_AUDIENCE: inventory-api
       OIDC_CLIENT_ID: standalone-runner
       OIDC_CLIENT_SECRET: ${STANDALONE_RUNNER_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
-      OIDC_SERVICE_SCOPES: "catalog:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest"
+      OIDC_SERVICE_SCOPES: "catalog:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest events:read"
       ORDER_API_URL: http://order-api:8000
       INVENTORY_API_URL: http://inventory-api:8001
       SUPPLIER_API_URL: http://supplier-simulator:8002
