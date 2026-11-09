@@ -272,6 +272,7 @@ class PostgresSupplierSimulation:
             # Simulator crashed. Recover the canonical product by its SKU.
             products_response = await client.get(
                 "/products",
+                params={"include_inactive": "true"},
                 headers={"X-Correlation-ID": correlation_id},
             )
             products_response.raise_for_status()
