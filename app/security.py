@@ -390,6 +390,8 @@ async def _request_service_token(
         logger.error("oidc.service_token.unavailable: %s", type(exc).__name__)
         raise RuntimeError("Could not obtain service access token") from None
 
+    if not isinstance(payload, dict):
+        raise RuntimeError("Identity provider returned an invalid service-token response")
     access_token = payload.get("access_token")
     token_type = payload.get("token_type", "Bearer")
     try:
@@ -465,6 +467,8 @@ def service_authorization_headers_sync(*required_scopes: str) -> dict[str, str]:
             logger.error("oidc.service_token.unavailable: %s", type(exc).__name__)
             raise RuntimeError("Could not obtain service access token") from None
 
+        if not isinstance(payload, dict):
+            raise RuntimeError("Identity provider returned an invalid service-token response")
         access_token = payload.get("access_token")
         token_type = payload.get("token_type", "Bearer")
         try:
