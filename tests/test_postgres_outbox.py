@@ -412,6 +412,42 @@ async def test_collector_ack_lost_after_persist_is_safely_redelivered(
 
 
 @pytest.mark.asyncio
+async def test_retryable_outbox_event_blocks_after_attempt_limit(
+    outbox_database_url: str,
+) -> None:
+    database = await open_database(outbox_database_url)
+    try:
+        repository = PostgresOutboxRepository(database)
+        event_id = await insert_outbox_event(database, name="test.retry-ceiling")
+
+        def unavailable(_request: httpx.Request) -> httpx.Response:
+            return httpx.Response(503, json={"detail": "collector unavailable"})
+
+        dispatcher = OutboxDispatcher(
+            repository,
+            collector_url="http://collector.test",
+            batch_size=1,
+            max_attempts=2,
+            base_backoff_seconds=0,
+            max_backoff_seconds=0,
+            transport=httpx.MockTransport(unavailable),
+            worker_id="worker-retry-ceiling",
+        )
+        first = await dispatcher.dispatch_once()
+        second = await dispatcher.dispatch_once()
+        assert first["retried"] == 1
+        assert second["blocked"] == 1
+
+        rows = await outbox_rows(database)
+        row = next(item for item in rows if str(item["event_id"]) == event_id)
+        assert row["status"] == "blocked"
+        assert row["attempts"] == 2
+        assert row["last_error"] is not None
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
 async def test_transient_errors_retry_and_permanent_rejections_are_blocked(
     outbox_database_url: str,
 ) -> None:
