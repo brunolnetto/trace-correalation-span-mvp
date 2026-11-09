@@ -8,7 +8,7 @@ from decimal import Decimal
 from uuid import uuid4
 
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Security
 from opentelemetry import trace
 
 from app.observability import configure_observability, correlation_id_context
@@ -30,6 +30,7 @@ from app.order.workflow import (
 )
 from app.persistence.config import DatabaseSettings
 from app.persistence.database import DatabaseManager
+from app.security import authenticate_request
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("order-api")
@@ -112,7 +113,7 @@ async def healthcheck():
     return {"status": "ok", "service": "order-api"}
 
 
-@app.get("/orders/{order_id}", tags=["orders"])
+@app.get("/orders/{order_id}", tags=["orders"], dependencies=[Security(authenticate_request, scopes=["orders:read"])])
 async def get_order(order_id: int):
     logger.info("order.lookup.started", extra={"order_id": order_id})
 
@@ -164,7 +165,7 @@ async def persist_order_outcome(record: dict) -> None:
         ) from None
 
 
-@app.post("/orders/{order_id}/process", status_code=201, tags=["orders"])
+@app.post("/orders/{order_id}/process", status_code=201, tags=["orders"], dependencies=[Security(authenticate_request, scopes=["orders:process"])])
 async def process_order(order_id: int, request: ProcessOrderRequest):
     """Run or resume the durable Order Saga, compensating deterministic failures."""
     correlation_id = correlation_id_context.get() or ""
@@ -563,7 +564,7 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
     }
 
 
-@app.get("/orders/{order_id}/recovery", tags=["orders"])
+@app.get("/orders/{order_id}/recovery", tags=["orders"], dependencies=[Security(authenticate_request, scopes=["operations:read"])])
 async def get_order_recovery(order_id: int):
     """Expose durable Saga progress and reconciliation requirements."""
     if durable_order_executor is None:
