@@ -307,10 +307,30 @@ class SupplierSimulation:
                     continue
 
                 purchase_order_id = str(uuid4())
+                onboarded = next(
+                    (
+                        item
+                        for item in self._onboarded.values()
+                        if item["product"]["product_id"] == current_product_id
+                    ),
+                    None,
+                )
+                supplier_sku = (
+                    onboarded["supplier_sku"] if onboarded is not None else None
+                )
+                offering = (
+                    SUPPLIER_CATALOG.get(supplier_sku)
+                    if supplier_sku is not None
+                    else None
+                )
                 order = {
                     "purchase_order_id": purchase_order_id,
                     "product_id": current_product_id,
+                    "supplier_sku": supplier_sku,
                     "quantity": quantity,
+                    "unit_cost": (
+                        offering["unit_price"] if offering is not None else None
+                    ),
                     "status": "created",
                     "reorder_point": policy["reorder_point"],
                     "target_stock": policy["target_stock"],
