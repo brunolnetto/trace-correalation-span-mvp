@@ -301,6 +301,26 @@ suitable for an untrusted network. See
 [the Gateway Simulator guide](docs/api-gateway-simulator.md) for policy fields,
 examples, and current limitations.
 
+## Live Gateway scenario verification
+
+With the Compose stack running and the gateway exposed on port 18004, run:
+
+```bash
+uv run python scripts/verify-gateway-scenarios.py
+```
+
+The verifier exercises real downstream forwarding through `/inventory/7`, then
+applies temporary policy revisions to demonstrate a token-bucket rejection
+(429), an injected upstream HTTP failure (503), and an injected timeout (504).
+It restores the original `inventory` route policy in a `finally` block and
+checks that forwarding recovers. The script does not restart containers or
+delete volumes. Do not run it concurrently with another operator changing the
+gateway policy; policy updates use compare-and-swap revisions.
+
+The script exits non-zero on the first failed assertion. It requires a seeded
+Inventory API fixture with product ID 7, matching the repository's existing
+gateway smoke-test convention.
+
 ## Supplier onboarding and replenishment simulation
 
 The Supplier Simulation API is exposed on port 18002. Its fixture catalog
