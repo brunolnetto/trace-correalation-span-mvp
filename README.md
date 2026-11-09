@@ -20,7 +20,8 @@ Client
   v
 Order API
   |
-  | Sagaz: OrderProcessingSaga
+  | Durable Order Saga coordinator (PostgreSQL mode)
+  |   Sagaz action/compensation definitions:
   |   1. reserve_inventory
   |   2. charge_payment (local payment simulator)
   |   3. confirm_order
@@ -67,7 +68,8 @@ are forwarded asynchronously to the raw event collector.
 
 The IDs are deliberately not interchangeable. OpenTelemetry owns trace and
 span creation and W3C context propagation; the application owns the
-correlation ID; Sagaz owns the orchestration instance identifier.
+correlation ID and durable execution record; the Saga instance identifier is
+stable across retries and process restarts.
 
 ## Product catalog and inventory lifecycle
 
@@ -633,17 +635,26 @@ unit tests and explicit development use. PostgreSQL row locks and balance constr
 inventory writes. The PostgreSQL integration suite now covers multi-process
 contention, idempotent retries, transaction rollback, and balance constraints;
 see [the inventory concurrency contract](docs/inventory-concurrency.md).
-Supplier policy and purchase-order state are persisted in PostgreSQL;
-the demo payment gateway remains a process-local simulation: persisting a payment
-reference on the order does not make payment state or external payment effects
-durable.
+Supplier policy and purchase-order state are persisted in PostgreSQL. In
+PostgreSQL mode, the Order API also persists its Saga execution ledger,
+per-step forward/compensation state, and deterministic demo payment decisions.
+The in-memory payment gateway remains a test/development double. The durable
+payment adapter is still a local simulator, not a real payment provider.
+
+Sagaz 1.5.0's declarative storage API does not checkpoint individual steps or
+resume existing executions, so the Order API uses an application-owned
+coordinator backed by the existing psycopg pool. It retries ambiguous Inventory
+and payment operations with stable identities, serializes execution ownership
+with PostgreSQL advisory locks, and exposes incomplete work at
+`GET /orders/{order_id}/recovery`. See
+[the Order Saga recovery contract](docs/order-saga-recovery.md).
 
 This MVP sends traces directly to Jaeger and writes logs to container stdout;
 selected structured logs are also stored in append-only raw JSONL files by the
 Event Collector. It does not include an OpenTelemetry Collector, a full log
-search backend for analytics events, a durable payment ledger, a production
-payment provider, a transactional producer outbox, authentication, or
-production deployment hardening. The event collector is single-writer and its producer queue is
+search backend for analytics events, a production payment provider, a
+transactional producer outbox, authentication, or production deployment
+hardening. The event collector is single-writer and its producer queue is
 best-effort before acknowledgement. Sagaz is used for workflow orchestration
 and compensation; its in-memory configuration here is not a substitute for
 durable state and reconciliation infrastructure.
