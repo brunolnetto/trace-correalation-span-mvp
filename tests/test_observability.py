@@ -148,3 +148,21 @@ def test_correlation_id_log_filter_handles_outside_request_context():
 
     assert CorrelationIdLogFilter().filter(record) is True
     assert record.correlation_id is None
+
+
+
+def test_correlation_id_log_filter_preserves_explicit_background_context():
+    explicit = "550e8400-e29b-41d4-a716-446655440001"
+    record = logging.LogRecord(
+        name="test",
+        level=logging.ERROR,
+        pathname=__file__,
+        lineno=1,
+        msg="outbox.delivery.failed",
+        args=(),
+        exc_info=None,
+    )
+    record.correlation_id = explicit
+
+    assert CorrelationIdLogFilter().filter(record) is True
+    assert record.correlation_id == explicit
