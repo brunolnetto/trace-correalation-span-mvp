@@ -9,7 +9,12 @@ from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
 from app import observability
-from app.gateway_simulator.metrics import GatewayMetrics, metric_attributes
+from app.gateway_simulator.metrics import (
+    GATEWAY_METRIC_VIEWS,
+    GATEWAY_REQUEST_DURATION_BUCKETS_SECONDS,
+    GatewayMetrics,
+    metric_attributes,
+)
 from app.gateway_simulator.policy import (
     GatewayPolicy,
     GatewayRuntime,
@@ -21,7 +26,9 @@ from app.gateway_simulator.policy import (
 )
 
 configure_observability = observability.configure_observability
-observability.configure_observability = lambda app, service_name: None
+observability.configure_observability = (
+    lambda app, service_name, *, metric_views=(): None
+)
 try:
     gateway_module = import_module("app.gateway_simulator.main")
 finally:
@@ -478,9 +485,12 @@ def test_gateway_metric_dimensions_are_bounded():
 @pytest.mark.asyncio
 async def test_gateway_records_request_counter_and_duration_histogram():
     reader = InMemoryMetricReader()
-    provider = MeterProvider(metric_readers=[reader])
+    provider = MeterProvider(
+        metric_readers=[reader],
+        views=GATEWAY_METRIC_VIEWS,
+    )
     gateway_app.state.gateway_metrics = GatewayMetrics(
-        provider.get_meter("gateway-metrics-test")
+        provider.get_meter("app.gateway_simulator")
     )
 
     async with httpx.AsyncClient(
@@ -507,6 +517,9 @@ async def test_gateway_records_request_counter_and_duration_histogram():
 
     assert sum(point.value for point in request_points) == 2
     assert sum(point.count for point in duration_points) == 2
+    assert tuple(duration_points[0].explicit_bounds) == (
+        GATEWAY_REQUEST_DURATION_BUCKETS_SECONDS
+    )
     assert {
         point.attributes["gateway.simulation.outcome"]
         for point in request_points
