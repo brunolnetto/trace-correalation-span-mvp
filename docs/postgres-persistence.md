@@ -29,6 +29,11 @@ analytics products, never write authorities.
 - Demo data is a separate, explicit bootstrap. A normal production startup
   only opens the connection pool and checks database readiness; it does not
   apply schema changes or seed catalog/stock records.
+- Business event outbox rows are inserted by PostgreSQL triggers in the same
+  transaction as product/order changes, Inventory movements, supplier policy/PO
+  transitions, and replenishment decisions. A separate dispatcher owns leases,
+  retries, and Collector acknowledgement; stdout diagnostic logging remains
+  independent of this analytical event path.
 
 ## Persistence model
 
@@ -40,6 +45,7 @@ analytics products, never write authorities.
 | inventory_movements | Append-only deltas for physical and reserved quantities |
 | idempotency_records | Scoped key, canonical request hash, and replayable response |
 | orders | Durable order input, catalog price snapshot, outcome, Saga/payment/reservation references |
+| outbox_events | Immutable business event envelope, stable event ID, lease/retry state, Collector acknowledgement |
 
 `inventory_balances` is an operational projection. For each product,
 `on_hand` must equal the sum of `quantity_delta_on_hand` and `reserved` must
