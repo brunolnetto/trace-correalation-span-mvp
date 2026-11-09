@@ -40,7 +40,7 @@ ensure_scope() {
   local scope_file json_file scopes_json scope_id line
 
   scope_file="${scope//:/_}"
-  json_file="/tmp/keycloak-scope-${scope_file}-$.json"
+  json_file="/tmp/keycloak-scope-${scope_file}-$BASHPID.json"
   TEMP_FILES+=("$json_file")
   {
     printf '{\n'
@@ -92,7 +92,7 @@ ensure_client() {
   local audiences="$4"
   local json_file client_uuid clients_json line
 
-  json_file="/tmp/keycloak-client-${client}-$.json"
+  json_file="/tmp/keycloak-client-${client}-$BASHPID.json"
   TEMP_FILES+=("$json_file")
   {
     printf '{\n'
