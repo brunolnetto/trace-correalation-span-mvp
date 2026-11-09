@@ -82,7 +82,7 @@ def swagger_oauth_config() -> dict[str, Any]:
     return {
         "clientId": os.getenv("OIDC_PUBLIC_CLIENT_ID", "local-web"),
         "usePkceWithAuthorizationCodeGrant": True,
-        "scopes": ["openid"],
+        "scopes": ["openid", *_SCOPES],
     }
 
 
