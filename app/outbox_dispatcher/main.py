@@ -81,6 +81,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             except TimeoutError:
                 dispatcher_task.cancel()
                 await asyncio.gather(dispatcher_task, return_exceptions=True)
+            except Exception:
+                logger.exception("outbox.dispatcher.shutdown_failed")
             finally:
                 dispatcher_task = None
         dispatcher = None
