@@ -49,11 +49,22 @@ ensure_scope() {
     printf '}\n'
   } > "$json_file"
 
-  scopes_json="$("$KCADM" get client-scopes -r "$REALM" -q "name=$scope" 2>/dev/null || true)"
+  scopes_json="$("$KCADM" get client-scopes -r "$REALM" 2>/dev/null || true)"
   scope_id=""
+  current_id=""
+  current_name=""
   while IFS= read -r line; do
+    if [[ "$line" == *"{"* ]]; then
+      current_id=""
+      current_name=""
+    fi
     if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
-      scope_id="${BASH_REMATCH[1]}"
+      current_id="${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ \"name\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
+      current_name="${BASH_REMATCH[1]}"
+    fi
+    if [[ "$current_id" && "$current_name" == "$scope" ]]; then
+      scope_id="$current_id"
       break
     fi
   done <<< "$scopes_json"
