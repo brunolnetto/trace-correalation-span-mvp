@@ -5,6 +5,7 @@ from decimal import Decimal
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
+import httpx
 import psycopg
 import pytest
 from psycopg import sql
@@ -520,5 +521,124 @@ async def test_order_confirmation_commit_before_checkpoint_is_idempotent(
         assert confirm_step["forward_status"] == "completed"
     finally:
         configure_order_repository(None)
+        await restarted_database.close()
+
+class ConfirmFailureAfterChargeSaga:
+    """Exercises refund-before-release compensation and a lost refund checkpoint."""
+
+    def __init__(
+        self,
+        gateway: PostgresPaymentGateway,
+        *,
+        compensation_order: list[str],
+        released_effects: set[str],
+    ) -> None:
+        self.gateway = gateway
+        self.compensation_order = compensation_order
+        self.released_effects = released_effects
+
+    async def reserve_inventory(self, context: dict) -> dict:
+        return {}
+
+    async def charge_payment(self, context: dict) -> dict:
+        payment_id = await self.gateway.charge(context)
+        return {"payment_id": payment_id}
+
+    async def confirm_order(self, context: dict) -> dict:
+        request = httpx.Request("POST", "http://order.test/confirm")
+        response = httpx.Response(409, request=request)
+        raise httpx.HTTPStatusError(
+            "simulated confirmation rejection",
+            request=request,
+            response=response,
+        )
+
+    async def refund_payment(self, context: dict) -> None:
+        self.compensation_order.append("refund")
+        await self.gateway.refund(context["payment_id"])
+
+    async def release_inventory(self, context: dict) -> None:
+        self.compensation_order.append("release")
+        self.released_effects.add(context["saga_id"])
+
+
+@pytest.mark.asyncio
+async def test_restart_retries_refund_before_inventory_release(
+    isolated_postgres_schema,
+    monkeypatch,
+):
+    database_url, product_id = isolated_postgres_schema
+    order_id = 910006
+    context = _context(order_id, product_id)
+    compensation_order: list[str] = []
+    released_effects: set[str] = set()
+
+    database = await _open_database(database_url)
+    repository = PostgresOrderSagaRepository(database)
+    gateway = PostgresPaymentGateway(database)
+    record = await repository.start_or_load(context)
+    saga = ConfirmFailureAfterChargeSaga(
+        gateway,
+        compensation_order=compensation_order,
+        released_effects=released_effects,
+    )
+    original_mark_complete = repository.mark_compensation_completed
+
+    async def crash_after_refund_commit(
+        saga_id: str, step_name: str
+    ) -> None:
+        if step_name == "charge_payment":
+            raise RuntimeError("simulated process loss after refund commit")
+        await original_mark_complete(saga_id, step_name)
+
+    monkeypatch.setattr(
+        repository,
+        "mark_compensation_completed",
+        crash_after_refund_commit,
+    )
+    with pytest.raises(RuntimeError, match="after refund commit"):
+        await DurableOrderExecutor(repository, gateway).execute(
+            saga, tracker=None, record=record
+        )
+    assert compensation_order == ["refund"]
+    assert released_effects == set()
+    payment_id = str(uuid5(NAMESPACE_URL, f"payment:{context['saga_id']}"))
+    assert await gateway.status(payment_id) == "refunded"
+    await database.close()
+
+    restarted_database = await _open_database(database_url)
+    try:
+        restarted_repository = PostgresOrderSagaRepository(
+            restarted_database
+        )
+        restarted_gateway = PostgresPaymentGateway(restarted_database)
+        pending = await restarted_repository.get_by_order(order_id)
+        assert pending is not None
+        assert pending["status"] == "compensating"
+
+        restarted_saga = ConfirmFailureAfterChargeSaga(
+            restarted_gateway,
+            compensation_order=compensation_order,
+            released_effects=released_effects,
+        )
+        with pytest.raises(DurableOrderFailure):
+            await DurableOrderExecutor(
+                restarted_repository, restarted_gateway
+            ).execute(restarted_saga, tracker=None, record=pending)
+
+        assert compensation_order == ["refund", "refund", "release"]
+        assert released_effects == {context["saga_id"]}
+        assert await restarted_gateway.status(payment_id) == "refunded"
+
+        recovered = await restarted_repository.get(context["saga_id"])
+        assert recovered is not None
+        assert recovered["status"] == "rolled_back"
+        compensation_states = {
+            step["step_name"]: step["compensation_status"]
+            for step in recovered["steps"]
+        }
+        assert compensation_states["charge_payment"] == "completed"
+        assert compensation_states["reserve_inventory"] == "completed"
+    finally:
         await restarted_database.close()
 
