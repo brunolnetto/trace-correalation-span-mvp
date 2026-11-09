@@ -24,6 +24,20 @@ from fastapi.security import (
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_LOCAL_ISSUER = "http://localhost:18080/realms/trace-local"
+_CONFIGURED_ISSUER = os.getenv("OIDC_ISSUER", _DEFAULT_LOCAL_ISSUER).rstrip("/")
+_PUBLIC_TOKEN_URL = os.getenv(
+    "OIDC_PUBLIC_TOKEN_URL",
+    os.getenv(
+        "OIDC_TOKEN_URL",
+        f"{_CONFIGURED_ISSUER}/protocol/openid-connect/token",
+    ),
+)
+_AUTHORIZATION_URL = os.getenv(
+    "OIDC_AUTHORIZATION_URL",
+    f"{_CONFIGURED_ISSUER}/protocol/openid-connect/auth",
+)
+
 _SCOPES = {
     "catalog:read": "Read product catalog",
     "catalog:write": "Create and update products",
@@ -46,27 +60,12 @@ _SCOPES = {
 oauth2_scheme = OAuth2(
     flows=OAuthFlows(
         authorizationCode=OAuthFlowAuthorizationCode(
-            authorizationUrl=os.getenv(
-                "OIDC_AUTHORIZATION_URL",
-                "http://localhost:18080/realms/trace-local/protocol/openid-connect/auth",
-            ),
-            tokenUrl=os.getenv(
-                "OIDC_PUBLIC_TOKEN_URL",
-                os.getenv(
-                    "OIDC_TOKEN_URL",
-                    "http://localhost:18080/realms/trace-local/protocol/openid-connect/token",
-                ),
-            ),
+            authorizationUrl=_AUTHORIZATION_URL,
+            tokenUrl=_PUBLIC_TOKEN_URL,
             scopes=_SCOPES,
         ),
         clientCredentials=OAuthFlowClientCredentials(
-            tokenUrl=os.getenv(
-                "OIDC_PUBLIC_TOKEN_URL",
-                os.getenv(
-                    "OIDC_TOKEN_URL",
-                    "http://localhost:18080/realms/trace-local/protocol/openid-connect/token",
-                ),
-            ),
+            tokenUrl=_PUBLIC_TOKEN_URL,
             scopes=_SCOPES,
         ),
     ),
