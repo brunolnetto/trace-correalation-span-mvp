@@ -1,7 +1,9 @@
 x-oidc-env: &oidc-env
   AUTH_MODE: oidc
-  OIDC_ISSUER: http://keycloak:8080/realms/trace-local
+  OIDC_ISSUER: http://localhost:${KEYCLOAK_HOST_PORT:-18080}/realms/trace-local
   OIDC_TOKEN_URL: http://keycloak:8080/realms/trace-local/protocol/openid-connect/token
+  OIDC_AUTHORIZATION_URL: http://localhost:${KEYCLOAK_HOST_PORT:-18080}/realms/trace-local/protocol/openid-connect/auth
+  OIDC_PUBLIC_TOKEN_URL: http://localhost:${KEYCLOAK_HOST_PORT:-18080}/realms/trace-local/protocol/openid-connect/token
   OIDC_INTROSPECTION_URL: http://keycloak:8080/realms/trace-local/protocol/openid-connect/token/introspect
   OIDC_TIMEOUT_SECONDS: "3"
   OIDC_INTROSPECTION_CACHE_SECONDS: "10"
@@ -13,6 +15,7 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-local-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Run scripts/prepare-dev-env.sh before starting Compose}
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_HOST_PORT:-18080}
     volumes:
       - keycloak-data:/opt/keycloak/data
     ports:
