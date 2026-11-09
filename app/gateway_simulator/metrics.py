@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 from opentelemetry.metrics import Meter
-
-
 HTTP_METHODS = frozenset(
     {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT"}
 )
