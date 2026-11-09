@@ -635,17 +635,14 @@ async def test_gateway_and_downstream_share_w3c_trace_and_correlated_logs():
         assert captured["traceparent"] is not None
 
         spans = exporter.get_finished_spans()
+        expected_caller_span_id = int(caller_span_id, 16)
         gateway_server = next(
             span
             for span in spans
             if span.kind is SpanKind.SERVER
-            and span.attributes.get("http.route") == "/{path:path}"
-        )
-        downstream_server = next(
-            span
-            for span in spans
-            if span.kind is SpanKind.SERVER
-            and span.attributes.get("http.route") == "/orders/probe"
+            and span.parent is not None
+            and span.parent.is_remote
+            and span.parent.span_id == expected_caller_span_id
         )
         gateway_client = next(
             span
@@ -654,9 +651,15 @@ async def test_gateway_and_downstream_share_w3c_trace_and_correlated_logs():
             and span.parent is not None
             and span.parent.span_id == gateway_server.context.span_id
         )
+        downstream_server = next(
+            span
+            for span in spans
+            if span.kind is SpanKind.SERVER
+            and span.parent is not None
+            and span.parent.span_id == gateway_client.context.span_id
+        )
 
         expected_trace_id = f"{int(trace_id, 16):032x}"
-        expected_caller_span_id = int(caller_span_id, 16)
         assert gateway_server.context.trace_id == int(trace_id, 16)
         assert gateway_server.parent is not None
         assert gateway_server.parent.is_remote
