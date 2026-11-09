@@ -184,7 +184,8 @@ class PostgresSupplierSimulation:
             )
             if recovered is None:
                 raise RuntimeError(
-                    "Persisted supplier onboarding points to a missing Inventory product"
+                    "Persisted supplier onboarding points to a missing "
+                    "Inventory product"
                 )
             return recovered
 
@@ -253,7 +254,8 @@ class PostgresSupplierSimulation:
                 and current["product_id"] != product_id
             ):
                 raise RuntimeError(
-                    "Supplier offering is already linked to a different Inventory product"
+                    "Supplier offering is already linked to a different "
+                    "Inventory product"
                 )
 
             now = await self._clock_time(connection)
@@ -837,7 +839,9 @@ class PostgresSupplierSimulation:
                     {"idempotency_key": f"supplier-po:{purchase_order_id}"},
                 )
             elif order["status"] != "receiving":
-                raise ValueError("Only ordered or receiving purchase orders can be received")
+                raise ValueError(
+                    "Only ordered or receiving purchase orders can be received"
+                )
 
             product_id = order["product_id"]
             quantity_cursor = await connection.execute(
@@ -913,7 +917,8 @@ class PostgresSupplierSimulation:
                 )
             if current["status"] != "receiving":
                 raise RuntimeError(
-                    "Purchase order left receiving state while Inventory receipt was in flight"
+                    "Purchase order left receiving state while Inventory "
+                    "receipt was in flight"
                 )
 
             now = await self._clock_time(connection)
