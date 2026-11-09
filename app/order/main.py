@@ -30,7 +30,7 @@ from app.order.workflow import (
 )
 from app.persistence.config import DatabaseSettings
 from app.persistence.database import DatabaseManager
-from app.security import authenticate_request, service_authorization_headers
+from app.security import authenticate_request, service_authorization_headers, swagger_oauth_config
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("order-api")
@@ -78,6 +78,7 @@ app = FastAPI(
     title="Order API",
     description="Order service demonstrating correlation IDs and distributed traces.",
     version="0.1.0",
+    swagger_ui_init_oauth=swagger_oauth_config(),
     lifespan=lifespan,
 )
 configure_observability(app, os.getenv("SERVICE_NAME", "order-api"))
