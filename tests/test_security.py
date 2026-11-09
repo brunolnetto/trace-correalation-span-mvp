@@ -342,6 +342,18 @@ async def test_inventory_route_accepts_valid_catalog_read_scope(
     assert isinstance(response.json(), list)
 
 
+def test_swagger_uses_public_pkce_client(monkeypatch):
+    monkeypatch.setenv("OIDC_PUBLIC_CLIENT_ID", "local-web")
+
+    config = security.swagger_oauth_config()
+
+    assert config == {
+        "clientId": "local-web",
+        "usePkceWithAuthorizationCodeGrant": True,
+        "scopes": ["openid"],
+    }
+
+
 def test_openapi_declares_oauth_flows_and_route_scopes():
     from app.inventory.main import app
 
