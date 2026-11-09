@@ -1,8 +1,8 @@
 # PostgreSQL persistence foundation
 
-This document tracks issue #21. PostgreSQL is the durable source of truth for
-the core Order and Inventory business state. The Event Collector and dbt remain observability and
-analytics products, never write authorities.
+This document tracks issue #21. PostgreSQL is the durable source of truth for Order, Inventory, and Supplier
+business state. The Event Collector and dbt remain observability and analytics
+products, never write authorities.
 
 ## Decisions
 
@@ -40,6 +40,12 @@ analytics products, never write authorities.
 | inventory_movements | Append-only deltas for physical and reserved quantities |
 | idempotency_records | Scoped key, canonical request hash, and replayable response |
 | orders | Durable order input, catalog price snapshot, outcome, Saga/payment/reservation references |
+| supplier_offerings | Fixture offering catalog and durable Inventory product onboarding reference |
+| supplier_reorder_policies | Versioned reorder thresholds and simulated lead time, one policy per product |
+| supplier_purchase_orders | Purchase-order header, lifecycle status, and policy/inventory snapshot |
+| supplier_purchase_order_lines | Durable supplier SKU, product, quantity, and unit-cost snapshot |
+| supplier_purchase_order_transitions | Append-only PO lifecycle history with correlation and transition metadata |
+| supplier_simulation_clock | Persisted deterministic supplier clock |
 
 `inventory_balances` is an operational projection. For each product,
 `on_hand` must equal the sum of `quantity_delta_on_hand` and `reserved` must
@@ -57,12 +63,15 @@ by environment:
   `DATABASE_URL` is configured. An explicit in-memory production backend is
   rejected; there is no silent fallback.
 
-The Order and Inventory FastAPI lifespans each open one
+The Order, Inventory, and Supplier FastAPI lifespans each open one
 `psycopg_pool.AsyncConnectionPool` per worker process and close it on shutdown.
-Connections use dict rows. Both `/healthz` endpoints perform a lightweight
+Connections use dict rows. Their `/healthz` endpoints perform a lightweight
 `SELECT 1` when PostgreSQL is selected and return HTTP 503 if the database is
 unavailable. Pools are created after each worker starts, not shared across
-forked processes.
+forked processes. The Supplier Simulator uses the same database settings and
+shared PostgreSQL database, but owns only supplier offerings, onboarding
+references, reorder policies, purchase orders, transition history, and its
+simulation clock. It never writes Inventory tables.
 
 ## Migration and local development
 
@@ -156,19 +165,46 @@ ledger.
 - Product, inventory, reservation, and movement response shapes remain
   compatible with the existing Inventory HTTP API.
 
-The PostgreSQL adapter uses row-level locks to prevent a projection update from
-being lost while the associated movement/idempotency rows are written. The
-explicit multi-process contention and no-overselling acceptance suite remains
-in issue #22; this issue does not claim that broader concurrency milestone is
-complete.
+The PostgreSQL Inventory adapter uses row-level locks and database
+constraints to protect balance, reservation, journal, and idempotency writes.
+The multi-process contention, retry, and rollback acceptance suite in #22
+covers independent API processes and database failure injection.
 
-## Remaining in #21
+## Supplier lifecycle and receipt recovery
 
-- Regenerate `uv.lock` with the new Psycopg runtime dependency and verify
-  `uv sync --locked --all-groups`.
-- Run the complete pytest, Ruff, PostgreSQL integration, and end-to-end
-  reproduction suites against the resolved dependency lock.
-- Review the final CI result and the PR diff.
+The Supplier Simulator stores its catalog offerings and onboarding references,
+reorder policies, PO headers and lines, transition history, and deterministic
+clock in the same PostgreSQL database. A partial unique index allows at most one
+active PO per product while its status is `created`, `ordered`, or
+`receiving`. Evaluations lock the product's reorder-policy row before looking
+for an active PO; the database index is the final duplicate-creation guard.
 
-Supplier policies and purchase-order lifecycle remain in issue #23. Transactional
-outbox delivery remains separately tracked.
+Receiving is a recoverable cross-service operation, not a distributed
+transaction:
+
+1. Commit the PO transition from `ordered` to `receiving`.
+2. Call the Inventory API outside the database transaction with the stable
+   `supplier-po:<purchase_order_id>` idempotency key.
+3. After Inventory acknowledges, commit the receipt ID, the `received`
+   transition, and an increment of the policy's inventory revision.
+
+If the Supplier Simulator stops before Inventory commits, or after Inventory
+commits but before Supplier persists `received`, the PO remains in
+`receiving`. A retry uses the same Inventory idempotency key. The first case
+applies stock once; the second replays the original receipt without a second
+stock credit. The simulated clock is initialized once and advances atomically
+in PostgreSQL, so a restart does not reset due times.
+
+The evaluation records the policy inventory revision before reading Inventory.
+If a receipt finalized during that read, a changed revision forces a fresh
+Inventory read while the policy row is locked. Receipt finalization also locks
+policy then PO, matching the evaluation lock order. This prevents a stale
+pre-receipt balance from creating a second PO immediately after the previous PO
+leaves the active state.
+
+The transition and PO-line tables reject UPDATE, DELETE, and TRUNCATE. Lifecycle
+history records each valid transition once, including its correlation ID and
+metadata. The Supplier API exposes that history at
+`GET /purchase-orders/{purchase_order_id}/transitions`.
+
+Transactional outbox delivery remains separately tracked in issue #25.
