@@ -13,6 +13,7 @@ cleanup_sensitive_files() {
   for file in "${TEMP_FILES[@]}"; do
     if [[ -f "$file" ]]; then
       : > "$file"
+      rm -f "$file"
     fi
   done
 }
@@ -107,7 +108,7 @@ ensure_client() {
     printf '  "standardFlowEnabled": false,\n'
     printf '  "directAccessGrantsEnabled": false,\n'
     printf '  "implicitFlowEnabled": false,\n'
-    printf '  "defaultOptionalClientScopes": ['
+    printf '  "optionalClientScopes": ['
     local first=1 scope
     for scope in $scopes; do
       if (( first )); then first=0; else printf ', '; fi
