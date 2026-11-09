@@ -107,7 +107,7 @@ ensure_client() {
     printf '  "standardFlowEnabled": false,\n'
     printf '  "directAccessGrantsEnabled": false,\n'
     printf '  "implicitFlowEnabled": false,\n'
-    printf '  "optionalClientScopes": ['
+    printf '  "defaultOptionalClientScopes": ['
     local first=1 scope
     for scope in $scopes; do
       if (( first )); then first=0; else printf ', '; fi
@@ -200,7 +200,7 @@ ensure_browser_client() {
     printf '}\n'
   } > "$json_file"
 
-  clients_json="$($KCADM get clients -r "$REALM" -q "clientId=$client" 2>/dev/null || true)"
+  clients_json="$("${KCADM[@]}" get clients -r "$REALM" -q "clientId=$client" 2>/dev/null || true)"
   client_uuid=""
   while IFS= read -r line; do
     if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
@@ -210,11 +210,11 @@ ensure_browser_client() {
   done <<< "$clients_json"
 
   if [[ -n "$client_uuid" ]]; then
-    if ! $KCADM update "clients/$client_uuid" -r "$REALM" -f "$json_file"; then
+    if ! "${KCADM[@]}" update "clients/$client_uuid" -r "$REALM" -f "$json_file"; then
       return 1
     fi
   else
-    if ! $KCADM create clients -r "$REALM" -f "$json_file"; then
+    if ! "${KCADM[@]}" create clients -r "$REALM" -f "$json_file"; then
       return 1
     fi
   fi
@@ -238,7 +238,7 @@ ensure_local_user() {
     printf '}\n'
   } > "$user_file"
 
-  users_json="$($KCADM get users -r "$REALM" -q "username=$username" 2>/dev/null || true)"
+  users_json="$("${KCADM[@]}" get users -r "$REALM" -q "username=$username" 2>/dev/null || true)"
   user_uuid=""
   while IFS= read -r line; do
     if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
@@ -248,10 +248,10 @@ ensure_local_user() {
   done <<< "$users_json"
 
   if [[ -n "$user_uuid" ]]; then
-    $KCADM update "users/$user_uuid" -r "$REALM" -f "$user_file"
+    "${KCADM[@]}" update "users/$user_uuid" -r "$REALM" -f "$user_file"
   else
-    $KCADM create users -r "$REALM" -f "$user_file"
-    users_json="$($KCADM get users -r "$REALM" -q "username=$username")"
+    "${KCADM[@]}" create users -r "$REALM" -f "$user_file"
+    users_json="$("${KCADM[@]}" get users -r "$REALM" -q "username=$username")"
     while IFS= read -r line; do
       if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
         user_uuid="${BASH_REMATCH[1]}"
@@ -267,8 +267,8 @@ ensure_local_user() {
 
   printf '{"type":"password","value":"%s","temporary":false}\n' \
     "$LOCAL_DEVELOPER_PASSWORD" > "$password_file"
-  $KCADM update "users/$user_uuid/reset-password" -r "$REALM" \
-    -f "$password_file" -n
+  "${KCADM[@]}" update "users/$user_uuid/reset-password" -r "$REALM" \
+    -f "$password_file"
 }
 
 # First create every client without audience references. Audience mapper client IDs
