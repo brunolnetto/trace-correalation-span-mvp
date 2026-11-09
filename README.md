@@ -675,9 +675,13 @@ POSTGRES_HOST_PORT=25434 bash scripts/reproduce-local.sh --cleanup
 For non-local deployments, configure `OIDC_ISSUER`, `OIDC_TOKEN_URL`,
 `OIDC_INTROSPECTION_URL`, `OIDC_AUDIENCE`, `OIDC_CLIENT_ID`,
 `OIDC_CLIENT_SECRET`, and `OIDC_SERVICE_SCOPES` from the deployment's
-secret/configuration system. Production endpoints must use HTTPS. Do not use
-the Keycloak `start-dev` service or generated local client secrets outside
-the development Compose environment. See
+secret/configuration system. Set `OIDC_AUTHORIZATION_URL` and
+`OIDC_PUBLIC_TOKEN_URL` when the Authorization Code flow or public Swagger UI
+uses browser-reachable endpoints that differ from the application’s
+back-channel token URL. Those two OpenAPI URLs otherwise derive from
+`OIDC_ISSUER`. Production endpoints must use HTTPS. Do not use the Keycloak
+`start-dev` service or generated local client secrets outside the development
+Compose environment. See
 [the API security design](docs/api-security-design.md) for the scope matrix
 and service identities.
 
