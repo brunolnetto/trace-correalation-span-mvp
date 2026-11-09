@@ -10,6 +10,11 @@
 #
 set -Eeuo pipefail
 
+# Isolate each reproduction run so named volumes cannot leak application state
+# across runs. --cleanup therefore removes only this run's disposable volumes.
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-trace-correalation-span-mvp}-repro-${BASHPID:-$}"
+export COMPOSE_PROJECT_NAME
+
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
@@ -68,9 +73,10 @@ TMP_DIR="$(mktemp -d)"
 cleanup_tmp() { rm -rf "$TMP_DIR"; }
 trap cleanup_tmp EXIT
 if (( CLEANUP )); then
-  trap 'docker compose down --remove-orphans || true; cleanup_tmp' EXIT
+  trap 'docker compose down --volumes --remove-orphans || true; cleanup_tmp' EXIT
 fi
 
+echo "    isolated Compose project: $COMPOSE_PROJECT_NAME"
 echo "==> 1/7: Resolve and install Python dependencies"
 uv lock --python 3.12
 uv sync --python 3.12 --all-groups --locked
