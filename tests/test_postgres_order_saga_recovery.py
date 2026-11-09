@@ -83,7 +83,7 @@ async def _open_database(database_url: str) -> DatabaseManager:
             database_url=database_url,
             connect_timeout_seconds=5,
             pool_min_size=1,
-            pool_max_size=4,
+            pool_max_size=1,
         )
     )
     return database
