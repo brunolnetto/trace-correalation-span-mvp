@@ -270,8 +270,9 @@ inventory_position = on_hand - reserved + on_order
 
 When inventory position is at or below the reorder point, the simulator creates
 one purchase order for `target_stock - inventory_position` units. An existing
-created or ordered PO suppresses duplicate reorder decisions. This accounts
-for already-committed reservations without treating them as available units.
+created, ordered, or receiving PO suppresses duplicate reorder decisions. This
+accounts for already-committed reservations without treating them as available
+units.
 
 Evaluate all configured policies or just one product:
 
@@ -280,10 +281,11 @@ curl -X POST http://localhost:18002/replenishments/evaluate
 curl -X POST 'http://localhost:18002/replenishments/evaluate?product_id=8'
 ```
 
-Purchase orders follow `created -> ordered -> received` or
+Purchase orders follow `created -> ordered -> receiving -> received` or
 `created -> cancelled`. Ordering records a due time based on the policy's
-lead time. The simulation clock can be advanced explicitly, so tests do not
-sleep while waiting for supplier deliveries:
+lead time. The simulation clock is stored in PostgreSQL when
+`PERSISTENCE_BACKEND=postgres`, so advancing it and restarting the Supplier
+Simulator does not reset the due-time calculation:
 
 ```bash
 curl -X POST http://localhost:18002/purchase-orders/<po-id>/order
@@ -292,11 +294,24 @@ curl -X POST http://localhost:18002/clock/advance \
 curl -X POST http://localhost:18002/purchase-orders/<po-id>/receive
 ```
 
-Receiving sends an idempotent receipt to Inventory API using
-`supplier-po:<purchase_order_id>`. Replaying a receive after a supplier
-simulator restart can therefore safely replay the same inventory receipt,
-provided the purchase order record is restored; supplier policies and PO
-records themselves remain process-local in this MVP.
+Receiving first commits the PO's `receiving` state and its transition
+record, then calls Inventory API using the stable idempotency key
+`supplier-po:<purchase_order_id>`. Only after Inventory acknowledges the
+receipt does the Supplier Simulator commit `received` and the receipt ID.
+If the process stops before or after Inventory commits, the PO remains in
+`receiving` and can be retried after restart. Inventory's idempotency record
+prevents double-crediting stock; Supplier never writes Inventory tables.
+
+With PostgreSQL selected, offerings and onboarding references, reorder
+policies, PO headers and lines, transition history, and the simulation clock
+are persisted. Inspect a PO's durable state history with:
+
+```bash
+curl http://localhost:18002/purchase-orders/<po-id>/transitions
+```
+
+The fixture supplier catalog is seeded by migration `0004`. Apply migrations
+before starting the Compose services with `bash scripts/migrate.sh`.
 
 Run the full supplier stack with:
 
@@ -573,7 +588,7 @@ uv run uvicorn app.order.main:app --port 8000
 | `LOG_LEVEL` | `INFO` | Python logging level |
 | `INVENTORY_API_URL` | `http://localhost:8001` | Inventory API base URL |
 | `INVENTORY_SEED_DEMO_DATA` | `false` | Explicitly bootstrap product 7 with 42 units when its durable demo state is absent |
-| `PERSISTENCE_BACKEND` | `memory` in development; `postgres` in production | Select the Inventory persistence adapter; production rejects the in-memory backend |
+| `PERSISTENCE_BACKEND` | `memory` in development; `postgres` in production | Select memory or PostgreSQL persistence for Inventory, Order, and Supplier; production rejects the in-memory backend |
 | `DATABASE_URL` | Required for PostgreSQL | PostgreSQL connection URL |
 | `DATABASE_CONNECT_TIMEOUT_SECONDS` | `5` | PostgreSQL connection/pool acquisition timeout |
 | `DATABASE_POOL_MIN_SIZE` | `1` | Minimum async pool size |
@@ -618,10 +633,13 @@ inventory writes. The PostgreSQL integration suite now covers multi-process
 contention, idempotent retries, transaction rollback, and balance constraints;
 see [the inventory concurrency contract](docs/inventory-concurrency.md).
 Supplier
-policies and purchase-order lifecycle persistence remain in issue #23. The
-demo payment gateway remains a process-local simulation: persisting a payment
-reference on the order does not make payment state or external payment effects
-durable.
+The Supplier Simulator persists fixture offerings, Inventory product
+onboarding references, reorder policies, purchase-order headers and lines,
+append-only transition history, and its simulated clock when PostgreSQL is
+selected. It remains the owner of supplier state; Inventory API remains the
+only authority for stock balances and receipts. The demo payment gateway
+remains a process-local simulation: persisting a payment reference on the order
+does not make payment state or external payment effects durable.
 
 This MVP sends traces directly to Jaeger and writes logs to container stdout;
 selected structured logs are also stored in append-only raw JSONL files by the
