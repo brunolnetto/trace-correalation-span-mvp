@@ -202,7 +202,7 @@ class PostgresOrderSagaRepository:
                     (
                         saga_id,
                         step_name,
-                        "pending" if compensation_name else "not_required",
+                        "not_required",
                     ),
                 )
             return await self._load_with_connection(connection, record["saga_id"])
@@ -816,7 +816,10 @@ class DurableOrderExecutor:
                 failed += 1
                 logger.exception(
                     "order.saga.recovery_failed",
-                    extra={"saga_id": record["saga_id"], "order_id": record["order_id"]},
+                    extra={
+                        "saga_id": record["saga_id"],
+                        "order_id": record["order_id"],
+                    },
                 )
         return {"found": len(records), "recovered": recovered, "failed": failed}
 
