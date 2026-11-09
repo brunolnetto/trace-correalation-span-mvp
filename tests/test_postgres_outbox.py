@@ -424,8 +424,6 @@ async def test_collector_ack_lost_after_persist_is_safely_redelivered(
             transport=httpx.MockTransport(collector),
             worker_id="worker-crash-window",
         )
-        mark_delivered = repository.mark_delivered
-
         async def lose_database_ack(**_kwargs: Any) -> bool:
             raise RuntimeError("simulated process loss before local acknowledgement")
 
