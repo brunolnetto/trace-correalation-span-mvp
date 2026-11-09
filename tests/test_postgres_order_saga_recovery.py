@@ -878,12 +878,15 @@ async def test_real_inventory_release_is_idempotent_after_compensation_restart(
     finally:
         await restarted_database.close()
 
+
 class FailedInventoryCompensationSaga(PostgresInventoryOrderSaga):
     async def release_inventory(self, context: dict) -> None:
         raise RuntimeError("simulated Inventory release failure")
 
 
 @pytest.mark.asyncio
+
+
 async def test_failed_compensation_is_visible_for_reconciliation(
     isolated_postgres_schema,
 ):
