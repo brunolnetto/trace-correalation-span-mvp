@@ -462,7 +462,6 @@ async def test_baseline_degraded_policy_and_recovery_are_observable():
     assert upstream_calls == 2
 
 
-
 def test_gateway_metric_dimensions_are_bounded():
     attributes = metric_attributes(
         "CUSTOM-VERB",
