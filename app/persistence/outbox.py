@@ -233,7 +233,9 @@ class OutboxDispatcher:
         if not collector_url.startswith(("http://", "https://")):
             raise ValueError("collector_url must be an HTTP(S) URL")
         if batch_size < 1 or lease_seconds < 1 or max_attempts < 1:
-            raise ValueError("batch_size, lease_seconds, and max_attempts must be positive")
+            raise ValueError(
+                "batch_size, lease_seconds, and max_attempts must be positive"
+            )
         if (
             base_backoff_seconds < 0
             or max_backoff_seconds < base_backoff_seconds
