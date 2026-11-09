@@ -8,7 +8,7 @@ Use standard OpenID Connect access tokens and OAuth 2.0 client credentials. Do n
 
 - **Local identity provider:** Keycloak in the development Compose stack, with a dedicated development realm.
 - **Non-local deployments:** Any standards-compliant OIDC provider may be configured through issuer, JWKS, audience, and token-endpoint settings. The application must not depend on Keycloak-specific claims.
-- **API verification:** Verify the JWT signature against the issuer's JWKS, pin the allowed asymmetric algorithm (RS256 for the initial implementation), and validate issuer, audience, expiry, not-before, issued-at, subject, and required authorization claims.
+- **API verification:** Use the OAuth 2.0 token-introspection endpoint over HTTPS. The identity provider validates token signature, signing-key state, and token activity. Each API independently validates the returned issuer, audience, expiry, not-before, issued-at, subject, and scope claims. Do not accept claims supplied by the caller or decode an unverified JWT locally.
 - **Human identity:** User access tokens carry explicit API scopes.
 - **Machine identity:** Each calling service obtains its own access token using OAuth 2.0 client credentials. A user's token is never forwarded to another service.
 - **Secrets:** Client secrets are injected from an ignored local environment file or a deployment secret manager. They must not be committed, copied into application images, or embedded in realm exports.
@@ -70,7 +70,7 @@ The initial machine identities are:
 
 | Caller | Downstream permission |
 |---|---|
-| `order-api` | `catalog:read inventory:reserve inventory:fulfill events:ingest` |
+| `order-api` | `catalog:read inventory:read inventory:reserve inventory:fulfill events:ingest` |
 | `inventory-api` | `events:ingest` |
 | `supplier-simulator` | `catalog:read catalog:write inventory:read inventory:receive events:ingest` |
 | `outbox-dispatcher` | `events:ingest` |
@@ -85,21 +85,21 @@ The Event Collector is a separate trust boundary: ingestion is for machine ident
 
 The implementation will expose configuration for:
 
-- OIDC issuer and JWKS URI;
+- OIDC issuer, token endpoint, and token-introspection endpoint;
 - API audience;
-- allowed signing algorithm (initially RS256; never inferred from an unverified JWT header);
+- bounded introspection cache TTL (default 10 seconds, maximum 30 seconds);
 - token endpoint for client-credentials grants;
 - service client ID, secret, and requested scopes;
 - bounded HTTP timeouts and token-cache safety margin.
 
-OIDC mode is the production mode. Missing issuer, audience, JWKS, or machine credentials must fail closed. An insecure auth bypass may exist only in tests with explicit test configuration; it must not be an available production or normal Compose mode.
+OIDC mode is the only application mode outside pytest. Missing issuer, audience, introspection endpoint, token endpoint, or client credentials fail closed. Production endpoints must use HTTPS. Introspection failures return 503 rather than silently accepting a token. A positive result is cached for at most 10 seconds by default (30 seconds maximum), which bounds the revocation propagation delay.
 
 ## Test strategy
 
 Tests must cover:
 
-1. Missing Authorization header, malformed Bearer header, malformed JWT, and invalid signature.
-2. Wrong issuer, wrong audience, expired token, future `nbf`, and missing required claims.
+1. Missing Authorization header, malformed Bearer header, malformed token, and inactive/invalid-signature token as reported by the IdP.
+2. Wrong issuer, wrong audience, expired token, future `nbf`/`iat`, and missing subject or scope claims.
 3. Valid token with required scope and valid token without required scope.
 4. Role/scope boundaries across catalog, orders, inventory, suppliers, Event Collector, and operations endpoints.
 5. Separate user and service identities; a service token must be accepted only for permissions it was granted.
@@ -107,7 +107,7 @@ Tests must cover:
 7. Local Compose user and service flows against the development OIDC realm.
 8. OpenAPI security declarations and minimal public health responses.
 
-The local reproduction must acquire a user token before calling protected public APIs. Internal service-to-service calls must use their own client-credentials tokens.
+The local reproduction acquires a broad, development-only `local-developer` client-credentials token before calling protected APIs. This is a local operator identity, not a human user login. Non-local human clients should use the provider's Authorization Code flow; internal service-to-service calls must use independent client-credentials identities.
 
 ## Non-goals
 
