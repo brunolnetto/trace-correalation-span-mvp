@@ -387,7 +387,10 @@ async def _request_service_token(
         ) as client:
             response = await client.post(
                 settings.token_url,
-                data={"grant_type": "client_credentials"},
+                data={
+                    "grant_type": "client_credentials",
+                    "scope": " ".join(sorted(scopes)),
+                },
                 auth=(settings.client_id, settings.client_secret),
                 headers={"Accept": "application/json"},
             )
@@ -466,7 +469,10 @@ def service_authorization_headers_sync(*required_scopes: str) -> dict[str, str]:
             ) as client:
                 response = client.post(
                     settings.token_url,
-                    data={"grant_type": "client_credentials"},
+                    data={
+                        "grant_type": "client_credentials",
+                        "scope": " ".join(sorted(requested)),
+                    },
                     auth=(settings.client_id, settings.client_secret),
                     headers={"Accept": "application/json"},
                 )
