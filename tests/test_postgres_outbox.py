@@ -5,6 +5,8 @@ import json
 import os
 from collections.abc import Iterator
 from decimal import Decimal
+
+from fastapi.encoders import jsonable_encoder
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
@@ -277,7 +279,11 @@ async def test_order_and_supplier_events_are_written_with_domain_transitions(
                 unit_price=offering["unit_price"],
             )
         )
-        await supplier.save_onboarding("BEANS-250", supplier_product)
+        # Match the JSON value received by Supplier from Inventory's HTTP API.
+        await supplier.save_onboarding(
+            "BEANS-250",
+            jsonable_encoder(supplier_product),
+        )
         await supplier.set_policy(
             ReorderPolicy(
                 product_id=supplier_product["product_id"],
