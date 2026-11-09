@@ -394,12 +394,14 @@ class PostgresOrderSagaRepository:
                 UPDATE order_saga_executions
                 SET status = %s,
                     context = COALESCE(%s, context),
-                    failure_category = COALESCE(%s, failure_category),
+                    failure_category = CASE
+                        WHEN %s IN ('running', 'completed') THEN NULL
+                        ELSE COALESCE(%s, failure_category)
+                    END,
                     last_error = %s,
                     updated_at = now(),
                     completed_at = CASE
-                        WHEN %s IN ('completed', 'rolled_back',
-                                    'reconciliation_required') THEN now()
+                        WHEN %s IN ('completed', 'rolled_back') THEN now()
                         ELSE NULL
                     END
                 WHERE saga_id = %s
@@ -407,6 +409,7 @@ class PostgresOrderSagaRepository:
                 (
                     status,
                     _json_dump(context) if context is not None else None,
+                    status,
                     failure_category,
                     error,
                     status,
