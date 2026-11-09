@@ -295,6 +295,15 @@ async def test_receipt_retry_is_safe_when_inventory_commits_but_response_is_lost
         )
     ] == ["created", "ordered", "receiving"]
 
+    # A PO in an ambiguous receiving state remains active and suppresses a
+    # replacement even though Inventory has already committed the receipt.
+    recovery_decision = await simulation.evaluate_replenishment(
+        client, "corr-recovery"
+    )
+    assert recovery_decision[0]["decision"] == "open_purchase_order_exists"
+    assert recovery_decision[0]["purchase_order_ids"] == [purchase_order_id]
+    assert len(await simulation.list_purchase_orders()) == 1
+
     # Retrying the same PO uses the same idempotency key. Inventory returns
     # the original receipt instead of applying the quantity a second time.
     retried = await simulation.receive_purchase_order(
