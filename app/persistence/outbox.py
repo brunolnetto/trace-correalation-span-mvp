@@ -309,7 +309,6 @@ class OutboxDispatcher:
         claim: dict[str, Any],
     ) -> str:
         outbox_id = int(claim["outbox_id"])
-        attempts = int(claim["attempts"])
         event = claim["event_payload"]
         try:
             response = await client.post(
