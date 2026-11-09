@@ -133,7 +133,8 @@ class CorrelationIdLogFilter(logging.Filter):
     """Attach the request correlation ID as an OTLP log attribute."""
 
     def filter(self, record: logging.LogRecord) -> bool:
-        record.correlation_id = correlation_id_context.get()
+        if getattr(record, "correlation_id", None) is None:
+            record.correlation_id = correlation_id_context.get()
         return True
 
 
