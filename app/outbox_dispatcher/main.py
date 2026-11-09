@@ -6,12 +6,13 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Security
 
 from app.observability import configure_observability
 from app.persistence.config import DatabaseSettings
 from app.persistence.database import DatabaseManager
 from app.persistence.outbox import OutboxDispatcher, PostgresOutboxRepository
+from app.security import authenticate_request
 
 logger = logging.getLogger(__name__)
 database = DatabaseManager(pool_name="outbox-dispatcher")
@@ -112,14 +113,14 @@ async def healthcheck():
     return {"status": "ok", "service": "outbox-dispatcher"}
 
 
-@app.get("/outbox/stats", tags=["operations"])
+@app.get("/outbox/stats", tags=["operations"], dependencies=[Security(authenticate_request, scopes=["operations:read"])])
 async def outbox_stats():
     if repository is None:
         raise HTTPException(status_code=503, detail="Outbox repository is unavailable.")
     return await repository.stats()
 
 
-@app.get("/outbox/blocked", tags=["operations"])
+@app.get("/outbox/blocked", tags=["operations"], dependencies=[Security(authenticate_request, scopes=["operations:read"])])
 async def blocked_outbox_events(
     limit: int = Query(default=100, ge=1, le=1000)
 ):
