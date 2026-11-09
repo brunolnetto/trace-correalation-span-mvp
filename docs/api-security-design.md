@@ -79,7 +79,7 @@ The initial machine identities are:
 
 The caller obtains a token for its own identity, requests only the scopes required by the downstream operation, caches it only until shortly before expiry, and sends it as a Bearer token. Each downstream API independently validates the token and its scopes. Its audience must identify the receiving API; the local Keycloak configuration does not attach every API audience to every service token. The identity provider, not an inbound `X-Service-Name` header, establishes the caller identity.
 
-The local Keycloak realm models each permission as an optional OIDC client scope with `include.in.token.scope=true`. Each service client is linked only to its allowed scope names. The caller requests the exact subset for an operation via the standard OAuth `scope` parameter. Keycloak adds only those requested, client-permitted scopes to the access token and introspection response. Audience mappers are similarly limited to the receiving APIs each caller needs:
+The local Keycloak 26.6.2 realm models each permission as an optional OIDC client scope with `include.in.token.scope=true`. Keycloak 26.6.2 also validates that the authenticated introspection client is included in the token's audience, so each service token receives only the API audiences it is intended to call. Each service client is linked only to its allowed scope names. The caller requests the exact subset for an operation via the standard OAuth `scope` parameter. Keycloak adds only those requested, client-permitted scopes to the access token and introspection response. Audience mappers are similarly limited to the receiving APIs each caller needs:
 
 | Client | Downstream audiences |
 |---|---|
@@ -95,14 +95,14 @@ The Event Collector is a separate trust boundary: ingestion is for machine ident
 
 ## Configuration and safe defaults
 
-The implementation will expose configuration for:
+The implementation exposes configuration for:
 
 - OIDC issuer, token endpoint, and token-introspection endpoint;
 - API audience;
+- public Authorization Code authorization/token URLs for OpenAPI (derived from the issuer by default; override when public and back-channel endpoints differ);
 - bounded introspection cache TTL (default 10 seconds, maximum 30 seconds);
-- token endpoint for client-credentials grants;
-- service client ID, secret, and requested scopes;
-- bounded HTTP timeouts and token-cache safety margin.
+- service client ID, secret, and permitted scopes;
+- bounded HTTP timeouts and service-token cache safety margin.
 
 OIDC mode is the only application mode outside pytest. Missing issuer, audience, introspection endpoint, token endpoint, or client credentials fail closed. Production endpoints must use HTTPS. Introspection failures return 503 rather than silently accepting a token. A positive result is cached for at most 10 seconds by default (30 seconds maximum), which bounds the revocation propagation delay.
 
