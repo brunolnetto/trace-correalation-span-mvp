@@ -159,6 +159,7 @@ async def test_failed_compensation_returns_reconciliation_details(monkeypatch):
 
     assert response.status_code == 500
     assert workflow._orders[123]["status"] == "compensation_incomplete"
+    assert workflow._orders[123]["reservation_id"] == "reservation-api-test"
     detail = response.json()["detail"]
     assert detail["message"] == (
         "Order processing failed and compensation is incomplete."
