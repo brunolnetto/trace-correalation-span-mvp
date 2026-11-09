@@ -227,7 +227,8 @@ async def list_purchase_order_transitions(purchase_order_id: str):
 @app.post(
     "/purchase-orders/{purchase_order_id}/order",
     tags=["supplier"],
-, dependencies=[Security(authenticate_request, scopes=["suppliers:manage"])])
+    dependencies=[Security(authenticate_request, scopes=["suppliers:manage"])],
+)
 async def order_purchase_order(purchase_order_id: str):
     try:
         result = await simulation.order_purchase_order(purchase_order_id)
@@ -255,7 +256,8 @@ async def order_purchase_order(purchase_order_id: str):
 @app.post(
     "/purchase-orders/{purchase_order_id}/receive",
     tags=["supplier"],
-, dependencies=[Security(authenticate_request, scopes=["suppliers:manage"])])
+    dependencies=[Security(authenticate_request, scopes=["suppliers:manage"])],
+)
 async def receive_purchase_order(purchase_order_id: str):
     try:
         async with inventory_client("inventory:receive") as client:
@@ -289,7 +291,8 @@ async def receive_purchase_order(purchase_order_id: str):
 @app.post(
     "/purchase-orders/{purchase_order_id}/cancel",
     tags=["supplier"],
-, dependencies=[Security(authenticate_request, scopes=["suppliers:manage"])])
+    dependencies=[Security(authenticate_request, scopes=["suppliers:manage"])],
+)
 async def cancel_purchase_order(purchase_order_id: str):
     try:
         result = await simulation.cancel_purchase_order(purchase_order_id)
