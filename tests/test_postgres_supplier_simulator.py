@@ -657,15 +657,11 @@ async def _wait_for_supplier_process(
     )
 
 
-async def _stop_supplier_process(process: subprocess.Popen) -> None:
+async def _kill_supplier_process(process: subprocess.Popen) -> None:
     if process.poll() is not None:
         return
-    process.terminate()
-    try:
-        await asyncio.to_thread(process.wait, timeout=10)
-    except subprocess.TimeoutExpired:
-        process.kill()
-        await asyncio.to_thread(process.wait, timeout=5)
+    process.kill()
+    await asyncio.to_thread(process.wait, timeout=5)
 
 
 @pytest.mark.asyncio
@@ -762,7 +758,7 @@ async def test_supplier_api_process_restart_recovers_receipt_without_double_cred
                 5 if failure_point == "before_commit" else 12
             )
 
-        await _stop_supplier_process(process)
+        await _kill_supplier_process(process)
         process = None
 
         # A fresh OS process must recover the persisted clock, PO state,
@@ -811,7 +807,7 @@ async def test_supplier_api_process_restart_recovers_receipt_without_double_cred
         assert inventory_state["receipt_calls"] == 2
     finally:
         if process is not None:
-            await _stop_supplier_process(process)
+            await _kill_supplier_process(process)
         inventory_server.shutdown()
         inventory_server.server_close()
         inventory_thread.join(timeout=5)
