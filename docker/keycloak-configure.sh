@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+umask 077
 
 KCADM="/opt/keycloak/bin/kcadm.sh"
 REALM="trace-local"
 SERVER="http://keycloak:8080"
 
 configured=0
-for attempt in $(seq 1 60); do
+attempt=0
+while (( attempt < 60 )); do
   if "$KCADM" config credentials \
     --server "$SERVER" \
     --realm master \
@@ -15,6 +17,7 @@ for attempt in $(seq 1 60); do
     configured=1
     break
   fi
+  attempt=$((attempt + 1))
   sleep 2
 done
 if (( ! configured )); then
@@ -33,9 +36,9 @@ ensure_client() {
   local client="$1"
   local secret="$2"
   local scopes="$3"
-  local json_file client_uuid
+  local json_file client_uuid clients_json line
 
-  json_file="$(mktemp)"
+  json_file="/tmp/keycloak-client-${client}-$.json"
   {
     printf '{\n'
     printf '  "clientId": "%s",\n' "$client"
@@ -62,14 +65,25 @@ ensure_client() {
     printf '}\n'
   } > "$json_file"
 
-  client_uuid="$("$KCADM" get clients -r "$REALM" -q "clientId=$client" 2>/dev/null \
-    | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-    | head -n 1)"
+  clients_json="$("$KCADM" get clients -r "$REALM" -q "clientId=$client" 2>/dev/null || true)"
+  client_uuid=""
+  while IFS= read -r line; do
+    if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
+      client_uuid="${BASH_REMATCH[1]}"
+      break
+    fi
+  done <<< "$clients_json"
 
   if [[ -n "$client_uuid" ]]; then
-    "$KCADM" update "clients/$client_uuid" -r "$REALM" -f "$json_file"
+    if ! "$KCADM" update "clients/$client_uuid" -r "$REALM" -f "$json_file"; then
+      rm -f "$json_file"
+      return 1
+    fi
   else
-    "$KCADM" create clients -r "$REALM" -f "$json_file"
+    if ! "$KCADM" create clients -r "$REALM" -f "$json_file"; then
+      rm -f "$json_file"
+      return 1
+    fi
   fi
   rm -f "$json_file"
 }
