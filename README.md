@@ -661,9 +661,17 @@ docker compose up --build --detach
 The local issuer is `http://localhost:18080/realms/trace-local`. Compose
 provisions separate confidential clients for the APIs, outbox dispatcher,
 order generator, standalone runner, and a broad `local-developer` operator
-identity. Client secrets are generated into the ignored `.env` file; they
-are not part of the repository or container images. The operator client is
-for local reproduction only and is not a substitute for a human login.
+identity. It also provisions a public `local-web` client using Authorization
+Code with PKCE and a `local-user` account for interactive Swagger UI login.
+Client secrets and the local user password are generated into the ignored
+`.env` file; they are not part of the repository or container images.
+
+Open an API's `/docs`, select **Authorize**, and use the `OIDC` flow. The
+browser redirects to Keycloak and returns through the PKCE callback. The
+development account defaults to username `local-user`; its generated password
+is stored as `LOCAL_DEVELOPER_PASSWORD` in `.env`. The broad confidential
+`local-developer` client is for the deterministic reproduction script only;
+it is not the human login client.
 
 The reproduction script creates this local environment and obtains its
 operator token automatically:
