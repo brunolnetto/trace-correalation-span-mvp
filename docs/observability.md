@@ -15,6 +15,7 @@ The local stack keeps three concerns separate:
 | Loki API | http://localhost:13100 |
 | Collector OTLP/gRPC | localhost:4317 |
 | Collector OTLP/HTTP | http://localhost:4318 |
+| Collector health | http://localhost:13133/ |
 
 Host ports can be overridden with `JAEGER_UI_HOST_PORT`, `GRAFANA_HOST_PORT`, `LOKI_HOST_PORT`, `OTLP_GRPC_HOST_PORT`, and `OTLP_HTTP_HOST_PORT`.
 
@@ -32,11 +33,28 @@ Filter a request by severity:
 {service_name="order-api"} | severity_text="ERROR"
 ```
 
-Find all diagnostic records for a business operation (replace the UUID):
+Find order failures by correlation ID (replace the UUID):
 
 ```logql
-{service_name=~"order-api|inventory-api|supplier-simulator"}
-  | correlation_id="550e8400-e29b-41d4-a716-446655440000"
+{service_name="order-api"} | correlation_id="550e8400-e29b-41d4-a716-446655440000"
+```
+
+Find inventory errors:
+
+```logql
+{service_name="inventory-api"} | severity_text="ERROR"
+```
+
+Find supplier simulator failures:
+
+```logql
+{service_name="supplier-simulator"} | severity_text="ERROR"
+```
+
+Inspect outbox delivery failures and retries:
+
+```logql
+{service_name="outbox-dispatcher"} | severity_text=~"WARN|ERROR"
 ```
 
 Filter by a trace ID copied from a log record:
