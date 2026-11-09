@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import time
 from collections import OrderedDict
 
@@ -90,7 +93,10 @@ async def test_introspection_validates_claims_and_caches_short_lived_result(
         active_payload(iat=time.time() + 60),
         active_payload(sub=""),
         active_payload(scope=""),
+        active_payload(client_id=""),
         active_payload(exp="not-a-timestamp"),
+        active_payload(exp=float("nan")),
+        active_payload(nbf=float("inf")),
     ],
 )
 async def test_invalid_introspection_claims_are_rejected(
@@ -183,12 +189,91 @@ def test_production_oidc_endpoints_must_use_https(oidc_environment, monkeypatch)
         security.AuthSettings.from_env()
 
 
-def test_test_auth_mode_is_unavailable_outside_pytest(oidc_environment, monkeypatch):
-    monkeypatch.setenv("AUTH_MODE", "test")
-    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+def test_test_auth_mode_is_unavailable_outside_pytest(oidc_environment):
+    environment = os.environ.copy()
+    environment["AUTH_MODE"] = "test"
+    environment["ENVIRONMENT"] = "development"
+    environment.pop("PYTEST_CURRENT_TEST", None)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from app.security import AuthSettings; AuthSettings.from_env()",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env=environment,
+    )
 
-    with pytest.raises(RuntimeError, match="only inside an active pytest run"):
-        security.AuthSettings.from_env()
+    assert result.returncode != 0
+    assert "AUTH_MODE=test is permitted" in result.stderr
+
+
+@pytest.mark.asyncio
+async def test_inventory_route_rejects_missing_bearer_token(oidc_environment):
+    import httpx
+
+    from app.inventory.main import app as inventory_app
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=inventory_app),
+        base_url="http://inventory.test",
+    ) as client:
+        response = await client.get("/products")
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+@pytest.mark.asyncio
+async def test_inventory_route_rejects_valid_identity_without_catalog_scope(
+    oidc_environment, monkeypatch
+):
+    import httpx
+
+    from app.inventory.main import app as inventory_app
+
+    async def fake_introspection(token, settings):
+        return active_payload(scope="orders:read")
+
+    monkeypatch.setattr(security, "_request_introspection", fake_introspection)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=inventory_app),
+        base_url="http://inventory.test",
+    ) as client:
+        response = await client.get(
+            "/products",
+            headers={"Authorization": "Bearer underprivileged-token"},
+        )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Insufficient scope"
+
+
+@pytest.mark.asyncio
+async def test_inventory_route_accepts_valid_catalog_read_scope(
+    oidc_environment, monkeypatch
+):
+    import httpx
+
+    from app.inventory.main import app as inventory_app
+
+    async def fake_introspection(token, settings):
+        return active_payload(scope="catalog:read")
+
+    monkeypatch.setattr(security, "_request_introspection", fake_introspection)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=inventory_app),
+        base_url="http://inventory.test",
+    ) as client:
+        response = await client.get(
+            "/products",
+            headers={"Authorization": "Bearer authorized-token"},
+        )
+
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
 
 
 def test_openapi_declares_oauth_flows_and_route_scopes():
