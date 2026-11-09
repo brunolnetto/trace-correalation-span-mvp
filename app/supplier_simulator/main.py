@@ -2,11 +2,16 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 
 from app.observability import configure_observability, correlation_id_context
+from app.persistence.config import DatabaseSettings
+from app.persistence.database import DatabaseManager
+from app.supplier_simulator.postgres_store import PostgresSupplierSimulation
 from app.supplier_simulator.store import (
     AdvanceClockRequest,
     ReorderPolicy,
@@ -17,14 +22,36 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="Supplier Simulation API",
     description="Deterministic supplier catalog and inventory replenishment simulator.",
-    version="0.1.0",
+    version="0.2.0",
+    lifespan=lifespan,
 )
 configure_observability(app, os.getenv("SERVICE_NAME", "supplier-simulator"))
 
 INVENTORY_API_URL = os.getenv(
     "INVENTORY_API_URL", "http://localhost:8001"
 )
-simulation = SupplierSimulation()
+simulation: SupplierSimulation | PostgresSupplierSimulation = SupplierSimulation()
+database_manager = DatabaseManager(pool_name="supplier-simulator")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    global simulation
+
+    settings = DatabaseSettings.from_env()
+    await database_manager.open(settings)
+    try:
+        if settings.backend == "postgres":
+            persistent_simulation = PostgresSupplierSimulation(database_manager)
+            await persistent_simulation.open()
+            simulation = persistent_simulation
+        else:
+            simulation = SupplierSimulation()
+
+        app.state.supplier_simulation = simulation
+        yield
+    finally:
+        await database_manager.close()
 
 
 def inventory_client() -> httpx.AsyncClient:
@@ -52,6 +79,8 @@ def map_inventory_error(exc: httpx.HTTPError) -> HTTPException:
 
 @app.get("/healthz", tags=["health"])
 async def healthcheck():
+    if not await database_manager.healthy():
+        raise HTTPException(status_code=503, detail="Database unavailable")
     return {"status": "ok", "service": "supplier-simulator"}
 
 
@@ -176,13 +205,28 @@ async def get_purchase_order(purchase_order_id: str):
         ) from None
 
 
+@app.get(
+    "/purchase-orders/{purchase_order_id}/transitions",
+    tags=["supplier"],
+)
+async def list_purchase_order_transitions(purchase_order_id: str):
+    try:
+        return await simulation.list_purchase_order_transitions(purchase_order_id)
+    except KeyError:
+        raise HTTPException(
+            status_code=404, detail="Purchase order not found."
+        ) from None
+
+
 @app.post(
     "/purchase-orders/{purchase_order_id}/order",
     tags=["supplier"],
 )
 async def order_purchase_order(purchase_order_id: str):
     try:
-        result = await simulation.order_purchase_order(purchase_order_id)
+        result = await simulation.order_purchase_order(
+            purchase_order_id, correlation_id()
+        )
     except KeyError:
         raise HTTPException(
             status_code=404, detail="Purchase order not found."
@@ -244,7 +288,9 @@ async def receive_purchase_order(purchase_order_id: str):
 )
 async def cancel_purchase_order(purchase_order_id: str):
     try:
-        result = await simulation.cancel_purchase_order(purchase_order_id)
+        result = await simulation.cancel_purchase_order(
+            purchase_order_id, correlation_id()
+        )
     except KeyError:
         raise HTTPException(
             status_code=404, detail="Purchase order not found."
