@@ -225,6 +225,17 @@ async def test_inventory_route_rejects_missing_bearer_token(oidc_environment):
     assert response.status_code == 401
     assert response.headers["www-authenticate"] == "Bearer"
 
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=inventory_app),
+        base_url="http://inventory.test",
+    ) as client:
+        malformed = await client.get(
+            "/products",
+            headers={"Authorization": "Basic not-a-bearer-token"},
+        )
+
+    assert malformed.status_code == 401
+
 
 @pytest.mark.asyncio
 async def test_inventory_route_rejects_valid_identity_without_catalog_scope(
