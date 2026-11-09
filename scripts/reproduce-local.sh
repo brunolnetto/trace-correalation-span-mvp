@@ -446,12 +446,16 @@ echo "    Jaeger contains declined-order trace $DECLINE_TRACE_ID with cross-serv
 # Correlation ID is structured metadata, not an indexed label.
 LOKI_QUERY='{service_name="order-api"} | correlation_id="'"$DECLINE_CORRELATION_ID"'"'
 LOKI_FOUND=0
+LOKI_END_NS="$(python3 -c 'import time; print(time.time_ns())')"
+LOKI_START_NS="$((LOKI_END_NS - 600000000000))"
 deadline=$((SECONDS + WAIT_SECONDS))
 while (( SECONDS < deadline )); do
   if curl --silent --show-error --fail --get \
     --data-urlencode "query=$LOKI_QUERY" \
     --data-urlencode "limit=1000" \
-    "$LOKI_URL/loki/api/v1/query" -o "$TMP_DIR/loki-query.json"; then
+    --data-urlencode "start=$LOKI_START_NS" \
+    --data-urlencode "end=$LOKI_END_NS" \
+    "$LOKI_URL/loki/api/v1/query_range" -o "$TMP_DIR/loki-query.json"; then
     if python3 - "$TMP_DIR/loki-query.json" <<'PY'
 import json
 import sys
