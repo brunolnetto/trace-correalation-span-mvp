@@ -234,7 +234,6 @@ def configure_tracing(service_name: str) -> TracerProvider:
     return provider
 
 
-
 def configure_metrics(service_name: str) -> MeterProvider | None:
     """Export SDK metrics to the configured OTLP/HTTP Collector endpoint."""
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
@@ -261,7 +260,6 @@ def configure_metrics(service_name: str) -> MeterProvider | None:
     metrics.set_meter_provider(provider)
     atexit.register(provider.shutdown)
     return provider
-
 
 
 def configure_observability(app: FastAPI, service_name: str) -> None:
