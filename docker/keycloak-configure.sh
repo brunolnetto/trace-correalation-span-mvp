@@ -5,11 +5,22 @@ KCADM="/opt/keycloak/bin/kcadm.sh"
 REALM="trace-local"
 SERVER="http://keycloak:8080"
 
-"$KCADM" config credentials \
-  --server "$SERVER" \
-  --realm master \
-  --user "$KC_BOOTSTRAP_ADMIN_USERNAME" \
-  --password "$KC_BOOTSTRAP_ADMIN_PASSWORD"
+configured=0
+for attempt in $(seq 1 60); do
+  if "$KCADM" config credentials \
+    --server "$SERVER" \
+    --realm master \
+    --user "$KC_BOOTSTRAP_ADMIN_USERNAME" \
+    --password "$KC_BOOTSTRAP_ADMIN_PASSWORD" >/dev/null 2>&1; then
+    configured=1
+    break
+  fi
+  sleep 2
+done
+if (( ! configured )); then
+  echo "Keycloak did not become ready for administrative provisioning" >&2
+  exit 1
+fi
 
 if ! "$KCADM" get "realms/$REALM" >/dev/null 2>&1; then
   "$KCADM" create realms -s "realm=$REALM" -s enabled=true
