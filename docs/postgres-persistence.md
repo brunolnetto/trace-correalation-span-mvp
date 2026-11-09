@@ -124,10 +124,12 @@ database URL. Each test creates a unique temporary schema, applies migrations
 to that empty schema, and drops it afterward. The test database user therefore
 needs permission to create and drop schemas. The tests cover first application,
 repeat execution, checksum drift, Inventory persistence, Order outcome
-create/update/read, catalog-failure capture, idempotency, append-only movement
-behavior, reconciliation, API contract preservation, and new pools after
-simulated process restart. CI provisions PostgreSQL and sets this variable. The end-to-end reproduction
-script accepts `POSTGRES_HOST_PORT=25432` when run against a non-default port.
+create/update/read, Supplier lifecycle persistence and receipt recovery across
+real Supplier Simulator process restarts, catalog-failure capture, idempotency,
+append-only movement/history behavior, reconciliation, API contract preservation,
+and new pools after simulated process restart. CI provisions PostgreSQL and
+sets this variable. The end-to-end reproduction script accepts
+`POSTGRES_HOST_PORT=25432` when run against a non-default port.
 
 ## Order outcome persistence
 
