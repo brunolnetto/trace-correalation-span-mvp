@@ -5,7 +5,7 @@ import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query, status
+from fastapi import FastAPI, HTTPException, Query, Security, status
 from opentelemetry import trace
 
 from app.inventory.postgres_store import PostgresInventoryStore
@@ -21,6 +21,7 @@ from app.observability import configure_observability
 from app.persistence.config import DatabaseSettings
 from app.persistence.database import DatabaseManager
 from app.persistence.ports import InventoryStorePort
+from app.security import authenticate_request
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("inventory-api")
@@ -75,7 +76,7 @@ async def healthcheck():
     return {"status": "ok", "service": "inventory-api"}
 
 
-@app.post("/products", status_code=status.HTTP_201_CREATED, tags=["catalog"])
+@app.post("/products", status_code=status.HTTP_201_CREATED, tags=["catalog"], dependencies=[Security(authenticate_request, scopes=["catalog:write"])])
 async def create_product(request: ProductCreate):
     try:
         product = await inventory_store.create_product(request)
@@ -93,12 +94,12 @@ async def create_product(request: ProductCreate):
     return product
 
 
-@app.get("/products", tags=["catalog"])
+@app.get("/products", tags=["catalog"], dependencies=[Security(authenticate_request, scopes=["catalog:read"])])
 async def list_products(include_inactive: bool = False):
     return await inventory_store.list_products(include_inactive=include_inactive)
 
 
-@app.get("/products/{product_id}", tags=["catalog"])
+@app.get("/products/{product_id}", tags=["catalog"], dependencies=[Security(authenticate_request, scopes=["catalog:read"])])
 async def get_product(product_id: int):
     try:
         return await inventory_store.get_product(product_id)
@@ -106,7 +107,7 @@ async def get_product(product_id: int):
         raise HTTPException(status_code=404, detail="Product not found") from None
 
 
-@app.patch("/products/{product_id}", tags=["catalog"])
+@app.patch("/products/{product_id}", tags=["catalog"], dependencies=[Security(authenticate_request, scopes=["catalog:write"])])
 async def update_product(product_id: int, request: ProductUpdate):
     try:
         product = await inventory_store.update_product(product_id, request)
@@ -125,7 +126,7 @@ async def update_product(product_id: int, request: ProductUpdate):
     return product
 
 
-@app.get("/inventory/{product_id}", tags=["inventory"])
+@app.get("/inventory/{product_id}", tags=["inventory"], dependencies=[Security(authenticate_request, scopes=["inventory:read"])])
 async def get_inventory(product_id: int):
     with tracer.start_as_current_span("inventory.lookup") as span:
         span.set_attribute("inventory.product_id", product_id)
@@ -152,7 +153,7 @@ async def get_inventory(product_id: int):
     "/inventory/{product_id}/receipts",
     status_code=status.HTTP_201_CREATED,
     tags=["inventory"],
-)
+, dependencies=[Security(authenticate_request, scopes=["inventory:receive"])])
 async def receive_inventory(product_id: int, request: InventoryReceiptRequest):
     with tracer.start_as_current_span("inventory.receive") as span:
         span.set_attribute("inventory.product_id", product_id)
@@ -184,7 +185,7 @@ async def receive_inventory(product_id: int, request: InventoryReceiptRequest):
     "/inventory/{product_id}/adjustments",
     status_code=status.HTTP_201_CREATED,
     tags=["inventory"],
-)
+, dependencies=[Security(authenticate_request, scopes=["inventory:adjust"])])
 async def adjust_inventory(
     product_id: int, request: InventoryAdjustmentRequest
 ):
@@ -214,7 +215,7 @@ async def adjust_inventory(
         return movement
 
 
-@app.get("/inventory/{product_id}/movements", tags=["inventory"])
+@app.get("/inventory/{product_id}/movements", tags=["inventory"], dependencies=[Security(authenticate_request, scopes=["inventory:read"])])
 async def list_inventory_movements(
     product_id: int,
     limit: int = Query(default=100, ge=1, le=500),
@@ -225,7 +226,7 @@ async def list_inventory_movements(
         raise HTTPException(status_code=404, detail="Product not found") from None
 
 
-@app.post("/inventory/{product_id}/reservations", tags=["inventory"])
+@app.post("/inventory/{product_id}/reservations", tags=["inventory"], dependencies=[Security(authenticate_request, scopes=["inventory:reserve"])])
 async def reserve_inventory(
     product_id: int, request: InventoryReservationRequest
 ):
@@ -272,7 +273,7 @@ async def reserve_inventory(
 @app.post(
     "/inventory/reservations/{reservation_id}/commit",
     tags=["inventory"],
-)
+, dependencies=[Security(authenticate_request, scopes=["inventory:fulfill"])])
 async def commit_inventory_reservation(reservation_id: str):
     with tracer.start_as_current_span("inventory.commit") as span:
         span.set_attribute("inventory.reservation_id", reservation_id)
@@ -303,7 +304,7 @@ async def commit_inventory_reservation(reservation_id: str):
 @app.delete(
     "/inventory/reservations/{reservation_id}",
     tags=["inventory"],
-)
+, dependencies=[Security(authenticate_request, scopes=["inventory:reserve"])])
 async def release_inventory(reservation_id: str):
     with tracer.start_as_current_span("inventory.release") as span:
         span.set_attribute("inventory.reservation_id", reservation_id)
