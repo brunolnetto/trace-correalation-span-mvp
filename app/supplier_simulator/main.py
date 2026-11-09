@@ -6,12 +6,13 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Security
 
 from app.observability import configure_observability, correlation_id_context
 from app.persistence.config import DatabaseSettings
 from app.persistence.database import DatabaseManager
 from app.supplier_simulator.postgres_store import PostgresSupplierSimulation
+from app.security import authenticate_request
 from app.supplier_simulator.store import (
     AdvanceClockRequest,
     ReorderPolicy,
@@ -85,12 +86,12 @@ async def healthcheck():
     return {"status": "ok", "service": "supplier-simulator"}
 
 
-@app.get("/supplier-catalog", tags=["supplier"])
+@app.get("/supplier-catalog", tags=["supplier"], dependencies=[Security(authenticate_request, scopes=["suppliers:read"])])
 async def list_supplier_offerings():
     return await simulation.list_offerings()
 
 
-@app.post("/supplier-catalog/{supplier_sku}/onboard", tags=["supplier"])
+@app.post("/supplier-catalog/{supplier_sku}/onboard", tags=["supplier"], dependencies=[Security(authenticate_request, scopes=["suppliers:manage"])])
 async def onboard_supplier_product(supplier_sku: str):
     try:
         async with inventory_client() as client:
@@ -115,12 +116,12 @@ async def onboard_supplier_product(supplier_sku: str):
     return result
 
 
-@app.get("/reorder-policies", tags=["replenishment"])
+@app.get("/reorder-policies", tags=["replenishment"], dependencies=[Security(authenticate_request, scopes=["suppliers:read"])])
 async def list_reorder_policies():
     return await simulation.list_policies()
 
 
-@app.put("/reorder-policies", tags=["replenishment"])
+@app.put("/reorder-policies", tags=["replenishment"], dependencies=[Security(authenticate_request, scopes=["suppliers:manage"])])
 async def upsert_reorder_policy(policy: ReorderPolicy):
     try:
         async with inventory_client() as client:
@@ -151,7 +152,7 @@ async def upsert_reorder_policy(policy: ReorderPolicy):
     return result
 
 
-@app.post("/replenishments/evaluate", tags=["replenishment"])
+@app.post("/replenishments/evaluate", tags=["replenishment"], dependencies=[Security(authenticate_request, scopes=["suppliers:evaluate"])])
 async def evaluate_replenishment(
     product_id: int | None = Query(default=None, gt=0)
 ):
@@ -191,12 +192,12 @@ async def evaluate_replenishment(
     return {"decisions": decisions}
 
 
-@app.get("/purchase-orders", tags=["supplier"])
+@app.get("/purchase-orders", tags=["supplier"], dependencies=[Security(authenticate_request, scopes=["suppliers:read"])])
 async def list_purchase_orders():
     return await simulation.list_purchase_orders()
 
 
-@app.get("/purchase-orders/{purchase_order_id}", tags=["supplier"])
+@app.get("/purchase-orders/{purchase_order_id}", tags=["supplier"], dependencies=[Security(authenticate_request, scopes=["suppliers:read"])])
 async def get_purchase_order(purchase_order_id: str):
     try:
         return await simulation.get_purchase_order(purchase_order_id)
@@ -206,7 +207,7 @@ async def get_purchase_order(purchase_order_id: str):
         ) from None
 
 
-@app.get("/purchase-orders/{purchase_order_id}/transitions", tags=["supplier"])
+@app.get("/purchase-orders/{purchase_order_id}/transitions", tags=["supplier"], dependencies=[Security(authenticate_request, scopes=["suppliers:read"])])
 async def list_purchase_order_transitions(purchase_order_id: str):
     try:
         return await simulation.list_purchase_order_transitions(purchase_order_id)
@@ -219,7 +220,7 @@ async def list_purchase_order_transitions(purchase_order_id: str):
 @app.post(
     "/purchase-orders/{purchase_order_id}/order",
     tags=["supplier"],
-)
+, dependencies=[Security(authenticate_request, scopes=["suppliers:manage"])])
 async def order_purchase_order(purchase_order_id: str):
     try:
         result = await simulation.order_purchase_order(purchase_order_id)
@@ -247,7 +248,7 @@ async def order_purchase_order(purchase_order_id: str):
 @app.post(
     "/purchase-orders/{purchase_order_id}/receive",
     tags=["supplier"],
-)
+, dependencies=[Security(authenticate_request, scopes=["suppliers:manage"])])
 async def receive_purchase_order(purchase_order_id: str):
     try:
         async with inventory_client() as client:
@@ -281,7 +282,7 @@ async def receive_purchase_order(purchase_order_id: str):
 @app.post(
     "/purchase-orders/{purchase_order_id}/cancel",
     tags=["supplier"],
-)
+, dependencies=[Security(authenticate_request, scopes=["suppliers:manage"])])
 async def cancel_purchase_order(purchase_order_id: str):
     try:
         result = await simulation.cancel_purchase_order(purchase_order_id)
@@ -304,12 +305,12 @@ async def cancel_purchase_order(purchase_order_id: str):
     return result
 
 
-@app.get("/clock", tags=["simulation"])
+@app.get("/clock", tags=["simulation"], dependencies=[Security(authenticate_request, scopes=["simulation:control"])])
 async def get_simulation_clock():
     return await simulation.clock()
 
 
-@app.post("/clock/advance", tags=["simulation"])
+@app.post("/clock/advance", tags=["simulation"], dependencies=[Security(authenticate_request, scopes=["simulation:control"])])
 async def advance_simulation_clock(request: AdvanceClockRequest):
     try:
         return await simulation.advance_clock(request.seconds)
