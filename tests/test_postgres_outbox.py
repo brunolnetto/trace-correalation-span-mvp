@@ -5,8 +5,6 @@ import json
 import os
 from collections.abc import Iterator
 from decimal import Decimal
-
-from fastapi.encoders import jsonable_encoder
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
@@ -14,6 +12,7 @@ from uuid import uuid4
 
 import httpx
 import psycopg
+from fastapi.encoders import jsonable_encoder
 import pytest
 from psycopg import sql
 from psycopg.types.json import Jsonb
