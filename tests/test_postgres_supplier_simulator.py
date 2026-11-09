@@ -309,40 +309,40 @@ async def test_supplier_state_survives_process_restarts_and_receipt_response_los
             with psycopg.connect(isolated_postgres_schema) as connection:
                 with pytest.raises(psycopg.errors.UniqueViolation), connection.transaction():
                     connection.execute(
-                            """
-                            INSERT INTO supplier_purchase_orders (
-                                purchase_order_id, product_id, supplier_sku,
-                                policy_version, reorder_point, target_stock,
-                                inventory_position_at_order, on_hand_at_order,
-                                reserved_at_order, on_order_at_order, quantity,
-                                lead_time_seconds, status, created_at
-                            )
-                            VALUES (
-                                %s, %s, 'BEANS-250', 1, 0, 10,
-                                0, 0, 0, 0, 1, 0, 'created', now()
-                            )
-                            """,
-                            (uuid4(), product_id),
+                        """
+                        INSERT INTO supplier_purchase_orders (
+                            purchase_order_id, product_id, supplier_sku,
+                            policy_version, reorder_point, target_stock,
+                            inventory_position_at_order, on_hand_at_order,
+                            reserved_at_order, on_order_at_order, quantity,
+                            lead_time_seconds, status, created_at
                         )
+                        VALUES (
+                            %s, %s, 'BEANS-250', 1, 0, 10,
+                            0, 0, 0, 0, 1, 0, 'created', now()
+                        )
+                        """,
+                        (uuid4(), product_id),
+                    )
 
                 with pytest.raises(
                     psycopg.errors.RaiseException, match="append-only"
                 ), connection.transaction():
                     connection.execute(
-                            """
-                            UPDATE supplier_purchase_order_transitions
-                            SET details = '{}'::jsonb
-                            WHERE purchase_order_id = %s
-                            """,
-                            (first_po_id,),
-                        )
+                        """
+                        UPDATE supplier_purchase_order_transitions
+                        SET details = '{}'::jsonb
+                        WHERE purchase_order_id = %s
+                        """,
+                        (first_po_id,),
+                    )
 
                 with pytest.raises(
                     psycopg.errors.RaiseException, match="append-only"
                 ), connection.transaction():
                     connection.execute(
-                            "TRUNCATE supplier_purchase_order_transitions"
-                        )
+                        "TRUNCATE supplier_purchase_order_transitions"
+                    )
 
             ordered = await supplier_a.post(
                 f"/purchase-orders/{first_po_id}/order"
