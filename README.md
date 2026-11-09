@@ -514,15 +514,16 @@ bash scripts/reproduce-local.sh
 ```
 
 The script resolves/synchronizes dependencies, starts PostgreSQL for the
-migration and repository integration tests, runs pytest and Ruff, builds and
-starts Jaeger, the Order/Inventory APIs, the Supplier Simulation API, and the
-Event Collector. It applies the schema migration before starting the APIs. It exercises a successful order, a payment decline with
-compensation, an insufficient-stock rejection, supplier onboarding and
-replenishment through a simulated lead time, and the generator's three
-coverage scenarios. It verifies balances, correlated JSON logs, cross-service
-Jaeger traces, and raw event persistence for order, supplier, and generator
-events, then runs `dbt build` against the collected raw event volume. It
-leaves the Compose stack running for inspection; stop it with
+migration and repository integration tests, runs pytest and Ruff, and starts
+the APIs, OpenTelemetry Collector, Jaeger, Loki, Grafana, and Event Collector.
+It applies the schema migration before starting the APIs. It exercises a
+successful order, a payment decline with compensation, an insufficient-stock
+rejection, supplier onboarding and replenishment through a simulated lead
+time, and the generator's three coverage scenarios. It verifies balances,
+correlated JSON logs, a Loki query by order correlation ID, cross-service
+Jaeger traces, and raw business-event persistence for order, supplier, and
+generator events, then runs `dbt build` against the collected raw event
+volume. It leaves the Compose stack running for inspection; stop it with
 `docker compose down`. Pass `--cleanup` to stop the stack automatically
 when the script exits.
 
