@@ -59,9 +59,19 @@ Outbox Dispatcher -- leased, at-least-once delivery --> Event Collector
                                                                v
                                                             dbt + DuckDB
 
-Non-transactional events (generator attempts and rejected reservations) use
-the bounded best-effort publisher. Diagnostic JSON logs remain on stdout.
-Services export OTLP traces to Jaeger.
+Non-transactional business events (generator attempts and rejected
+reservations) use the bounded best-effort publisher.
+
+Diagnostic telemetry follows a separate path:
+
+```text
+Python structured logs -- OTLP --> OpenTelemetry Collector --> Loki
+Python traces          -- OTLP --> OpenTelemetry Collector --> Jaeger
+```
+
+The Event Collector remains the analytical business-event sink; it is not
+replaced by Loki or OTLP log storage. See [diagnostic observability](docs/observability.md)
+for LogQL examples, retention, queue limits, and local endpoints.
 ```
 
 - **correlation_id** identifies the business operation across services.
