@@ -60,6 +60,48 @@ services:
       jaeger:
         condition: service_started
 
+  outbox-dispatcher:
+    build: .
+    command:
+      - uvicorn
+      - app.outbox_dispatcher.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8011"
+    environment:
+      SERVICE_NAME: outbox-dispatcher
+      PERSISTENCE_BACKEND: postgres
+      DATABASE_URL: postgresql://${POSTGRES_USER:-app}:${POSTGRES_PASSWORD:-app}@postgres:5432/${POSTGRES_DB:-app}
+      DATABASE_POOL_MIN_SIZE: "1"
+      DATABASE_POOL_MAX_SIZE: "5"
+      EVENT_COLLECTOR_URL: http://event-collector:8010
+      OUTBOX_BATCH_SIZE: "50"
+      OUTBOX_LEASE_SECONDS: "30"
+      OUTBOX_MAX_ATTEMPTS: "12"
+      OUTBOX_BASE_BACKOFF_SECONDS: "1"
+      OUTBOX_MAX_BACKOFF_SECONDS: "300"
+      OUTBOX_POLL_INTERVAL_SECONDS: "0.5"
+      OUTBOX_REQUEST_TIMEOUT_SECONDS: "5"
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://jaeger:4318/v1/traces
+      OTEL_TRACES_SAMPLER_ARG: "1.0"
+      ENVIRONMENT: development
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8011/healthz", timeout=2)
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    depends_on:
+      event-collector:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
   inventory-api:
     build: .
     command: ["uvicorn", "app.inventory.main:app", "--host", "0.0.0.0", "--port", "8001"]
@@ -202,6 +244,8 @@ services:
       supplier-simulator:
         condition: service_healthy
       event-collector:
+        condition: service_healthy
+      outbox-dispatcher:
         condition: service_healthy
 
   order-generator:
