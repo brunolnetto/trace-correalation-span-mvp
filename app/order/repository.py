@@ -89,6 +89,7 @@ class PostgresOrderRepository:
                     failure_category = EXCLUDED.failure_category,
                     correlation_id = EXCLUDED.correlation_id,
                     updated_at = now()
+                WHERE orders.saga_id IS NOT DISTINCT FROM EXCLUDED.saga_id
                 RETURNING *
                 """,
                 {
@@ -99,6 +100,10 @@ class PostgresOrderRepository:
                 },
             )
             row = await cursor.fetchone()
+            if row is None:
+                raise ValueError(
+                    f"Order {record['order_id']} is already owned by another Saga"
+                )
             return _order(row)
 
     async def get(self, order_id: int) -> dict[str, Any] | None:
