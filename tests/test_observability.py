@@ -114,7 +114,6 @@ def test_json_formatter_includes_correlation_and_extra_attributes():
         correlation_id_context.reset(token)
 
 
-
 def test_correlation_id_log_filter_adds_context_attribute():
     expected = "550e8400-e29b-41d4-a716-446655440000"
     token = correlation_id_context.set(expected)
@@ -148,7 +147,6 @@ def test_correlation_id_log_filter_handles_outside_request_context():
 
     assert CorrelationIdLogFilter().filter(record) is True
     assert record.correlation_id is None
-
 
 
 def test_correlation_id_log_filter_preserves_explicit_background_context():
