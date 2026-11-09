@@ -21,7 +21,7 @@ from app.observability import configure_observability
 from app.persistence.config import DatabaseSettings
 from app.persistence.database import DatabaseManager
 from app.persistence.ports import InventoryStorePort
-from app.security import authenticate_request
+from app.security import authenticate_request, swagger_oauth_config
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("inventory-api")
@@ -61,6 +61,7 @@ app = FastAPI(
     title="Inventory API",
     description="Product catalog and inventory lifecycle with correlated traces.",
     version="0.2.0",
+    swagger_ui_init_oauth=swagger_oauth_config(),
     lifespan=lifespan,
 )
 configure_observability(app, os.getenv("SERVICE_NAME", "inventory-api"))
