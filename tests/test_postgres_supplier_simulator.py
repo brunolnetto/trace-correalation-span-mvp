@@ -815,3 +815,108 @@ async def test_supplier_api_process_restart_recovers_receipt_without_double_cred
         inventory_server.shutdown()
         inventory_server.server_close()
         inventory_thread.join(timeout=5)
+
+
+
+@pytest.mark.asyncio
+async def test_replenishment_retries_inventory_read_if_receipt_finalizes_mid_read(
+    postgres_schema_url: str,
+):
+    manager, store = await _open_store(
+        postgres_schema_url, "supplier-stale-inventory-read"
+    )
+    inventory = InventoryHTTPDouble()
+    product_id = await _create_product(manager, "SKU-SUPPLIER-STALE-READ")
+    inventory.add_product(product_id, "SKU-SUPPLIER-STALE-READ", on_hand=5)
+    try:
+        await store.set_policy(
+            ReorderPolicy(
+                product_id=product_id,
+                reorder_point=5,
+                target_stock=12,
+                lead_time_seconds=60,
+            )
+        )
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(inventory.handler),
+            base_url="http://inventory.test",
+        ) as client:
+            decision = (
+                await store.evaluate_replenishment(
+                    client, "stale-read-create", product_id=product_id
+                )
+            )[0]
+            purchase_order_id = decision["purchase_order"]["purchase_order_id"]
+            await store.order_purchase_order(purchase_order_id, "stale-read-order")
+            await store.advance_clock(60)
+            received = await store.receive_purchase_order(
+                purchase_order_id, client, "stale-read-receipt"
+            )
+            assert received["status"] == "received"
+
+        # Force a stale revision marker, then simulate Inventory returning its
+        # old balance just as the persisted receipt revision becomes visible.
+        async with manager.connection() as connection:
+            await connection.execute(
+                """
+                UPDATE supplier_reorder_policies
+                SET inventory_revision = 0
+                WHERE product_id = %s
+                """,
+                (product_id,),
+            )
+
+        read_count = 0
+
+        def stale_inventory_handler(request: httpx.Request) -> httpx.Response:
+            nonlocal read_count
+            if request.method == "GET" and request.url.path == (
+                f"/inventory/{product_id}"
+            ):
+                read_count += 1
+                if read_count == 1:
+                    with psycopg.connect(postgres_schema_url) as connection:
+                        connection.execute(
+                            """
+                            UPDATE supplier_reorder_policies
+                            SET inventory_revision = 1
+                            WHERE product_id = %s
+                            """,
+                            (product_id,),
+                        )
+                    return httpx.Response(
+                        200,
+                        json={
+                            "product_id": product_id,
+                            "on_hand": 5,
+                            "reserved": 0,
+                            "available_quantity": 5,
+                        },
+                    )
+                return httpx.Response(
+                    200,
+                    json={
+                        "product_id": product_id,
+                        "on_hand": 12,
+                        "reserved": 0,
+                        "available_quantity": 12,
+                    },
+                )
+            return httpx.Response(404, json={"detail": "not found"})
+
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(stale_inventory_handler),
+            base_url="http://inventory.test",
+        ) as client:
+            after_receipt = await store.evaluate_replenishment(
+                client, "stale-read-after-receipt", product_id=product_id
+            )
+
+        assert read_count == 2
+        assert after_receipt[0]["decision"] == "no_reorder"
+        assert after_receipt[0]["inventory_position"] == 12
+        purchase_orders = await store.list_purchase_orders()
+        assert len(purchase_orders) == 1
+        assert purchase_orders[0]["status"] == "received"
+    finally:
+        await manager.close()
