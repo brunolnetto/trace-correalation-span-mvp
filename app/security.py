@@ -49,15 +49,21 @@ oauth2_scheme = OAuth2(
                 "http://localhost:18080/realms/trace-local/protocol/openid-connect/auth",
             ),
             tokenUrl=os.getenv(
-                "OIDC_TOKEN_URL",
-                "http://localhost:18080/realms/trace-local/protocol/openid-connect/token",
+                "OIDC_PUBLIC_TOKEN_URL",
+                os.getenv(
+                    "OIDC_TOKEN_URL",
+                    "http://localhost:18080/realms/trace-local/protocol/openid-connect/token",
+                ),
             ),
             scopes=_SCOPES,
         ),
         clientCredentials=OAuthFlowClientCredentials(
             tokenUrl=os.getenv(
-                "OIDC_TOKEN_URL",
-                "http://localhost:18080/realms/trace-local/protocol/openid-connect/token",
+                "OIDC_PUBLIC_TOKEN_URL",
+                os.getenv(
+                    "OIDC_TOKEN_URL",
+                    "http://localhost:18080/realms/trace-local/protocol/openid-connect/token",
+                ),
             ),
             scopes=_SCOPES,
         ),
