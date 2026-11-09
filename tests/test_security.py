@@ -365,3 +365,62 @@ def test_openapi_declares_oauth_flows_and_route_scopes():
     assert "inventory:reserve" in oauth["flows"]["clientCredentials"]["scopes"]
     assert {"OIDC": ["catalog:read"]} in schema["paths"]["/products"]["get"]["security"]
     assert "security" not in schema["paths"]["/healthz"]["get"]
+
+
+@pytest.mark.asyncio
+async def test_order_supplier_event_and_operations_apis_require_bearer_tokens(
+    oidc_environment,
+):
+    import httpx
+
+    from app.event_collector.main import app as event_app
+    from app.order.main import app as order_app
+    from app.outbox_dispatcher.main import app as outbox_app
+    from app.supplier_simulator.main import app as supplier_app
+
+    protected_surfaces = [
+        (order_app, "/orders/123", "http://order.test"),
+        (supplier_app, "/supplier-catalog", "http://supplier.test"),
+        (event_app, "/v1/events", "http://events.test"),
+        (outbox_app, "/outbox/stats", "http://outbox.test"),
+    ]
+    for app, path, base_url in protected_surfaces:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url=base_url,
+        ) as client:
+            response = await client.get(path)
+
+        assert response.status_code == 401, (path, response.text)
+        assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_openapi_declares_scopes_for_each_api_boundary():
+    from app.event_collector.main import app as event_app
+    from app.order.main import app as order_app
+    from app.outbox_dispatcher.main import app as outbox_app
+    from app.supplier_simulator.main import app as supplier_app
+
+    order_schema = order_app.openapi()
+    supplier_schema = supplier_app.openapi()
+    event_schema = event_app.openapi()
+    outbox_schema = outbox_app.openapi()
+
+    assert {"OIDC": ["orders:process"]} in order_schema["paths"][
+        "/orders/{order_id}/process"
+    ]["post"]["security"]
+    assert {"OIDC": ["simulation:control"]} in supplier_schema["paths"][
+        "/clock/advance"
+    ]["post"]["security"]
+    assert {"OIDC": ["events:ingest"]} in event_schema["paths"][
+        "/v1/events"
+    ]["post"]["security"]
+    assert {"OIDC": ["events:read"]} in event_schema["paths"][
+        "/v1/events"
+    ]["get"]["security"]
+    assert {"OIDC": ["operations:read"]} in outbox_schema["paths"][
+        "/outbox/blocked"
+    ]["get"]["security"]
+
+    for schema in (order_schema, supplier_schema, event_schema, outbox_schema):
+        assert "security" not in schema["paths"]["/healthz"]["get"]
