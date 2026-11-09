@@ -288,3 +288,135 @@ async def test_compensation_after_remote_commit_is_retried_after_restart(
         assert reserve_step["compensation_status"] == "completed"
     finally:
         await restarted_database.close()
+
+
+class InventoryResponseLostSaga:
+    """Models Inventory committing a reservation before its HTTP response is lost."""
+
+    def __init__(
+        self,
+        *,
+        external_effects: set[str],
+        lose_response: bool,
+    ) -> None:
+        self.external_effects = external_effects
+        self.lose_response = lose_response
+        self.reserve_attempts = 0
+
+    async def reserve_inventory(self, context: dict) -> dict:
+        self.reserve_attempts += 1
+        effect_key = f"{context['saga_id']}:{context['product_id']}"
+        self.external_effects.add(effect_key)
+        if self.lose_response:
+            self.lose_response = False
+            raise RuntimeError("simulated process loss after Inventory commit")
+        return {"inventory_effect_key": effect_key}
+
+    async def charge_payment(self, context: dict) -> dict:
+        return {"payment_id": "payment-test"}
+
+    async def confirm_order(self, context: dict) -> dict:
+        return {"order_status": "processed"}
+
+    async def release_inventory(self, context: dict) -> None:
+        return None
+
+    async def refund_payment(self, context: dict) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_execution_created_before_first_step_is_run_after_restart(
+    isolated_postgres_schema,
+):
+    database_url, product_id = isolated_postgres_schema
+    order_id = 910003
+    context = _context(order_id, product_id)
+
+    database = await _open_database(database_url)
+    record = await PostgresOrderSagaRepository(database).start_or_load(context)
+    assert record["status"] == "running"
+    assert all(
+        step["forward_status"] == "pending"
+        for step in record["steps"]
+    )
+    await database.close()
+
+    restarted_database = await _open_database(database_url)
+    try:
+        repository = PostgresOrderSagaRepository(restarted_database)
+        gateway = PostgresPaymentGateway(restarted_database)
+        effects: set[str] = set()
+        saga = InventoryResponseLostSaga(
+            external_effects=effects,
+            lose_response=False,
+        )
+        result = await DurableOrderExecutor(repository, gateway).execute(
+            saga,
+            tracker=None,
+            record=await repository.get_by_order(order_id),
+        )
+
+        assert result["order_status"] == "processed"
+        assert saga.reserve_attempts == 1
+        assert effects == {f"{context['saga_id']}:{product_id}"}
+    finally:
+        await restarted_database.close()
+
+
+@pytest.mark.asyncio
+async def test_inventory_commit_before_checkpoint_is_replayed_with_same_key(
+    isolated_postgres_schema,
+):
+    database_url, product_id = isolated_postgres_schema
+    order_id = 910004
+    context = _context(order_id, product_id)
+    effects: set[str] = set()
+
+    database = await _open_database(database_url)
+    repository = PostgresOrderSagaRepository(database)
+    gateway = PostgresPaymentGateway(database)
+    record = await repository.start_or_load(context)
+
+    with pytest.raises(RuntimeError, match="after Inventory commit"):
+        await DurableOrderExecutor(repository, gateway).execute(
+            InventoryResponseLostSaga(
+                external_effects=effects,
+                lose_response=True,
+            ),
+            tracker=None,
+            record=record,
+        )
+    await database.close()
+
+    restarted_database = await _open_database(database_url)
+    try:
+        restarted_repository = PostgresOrderSagaRepository(restarted_database)
+        restarted_gateway = PostgresPaymentGateway(restarted_database)
+        restarted_saga = InventoryResponseLostSaga(
+            external_effects=effects,
+            lose_response=False,
+        )
+        result = await DurableOrderExecutor(
+            restarted_repository, restarted_gateway
+        ).execute(
+            restarted_saga,
+            tracker=None,
+            record=await restarted_repository.get_by_order(order_id),
+        )
+
+        assert result["order_status"] == "processed"
+        assert restarted_saga.reserve_attempts == 1
+        assert effects == {f"{context['saga_id']}:{product_id}"}
+        recovered = await restarted_repository.get(context["saga_id"])
+        assert recovered is not None
+        assert recovered["status"] == "completed"
+        reserve_step = next(
+            step for step in recovered["steps"]
+            if step["step_name"] == "reserve_inventory"
+        )
+        assert reserve_step["forward_attempts"] == 2
+        assert reserve_step["forward_status"] == "completed"
+    finally:
+        await restarted_database.close()
+
