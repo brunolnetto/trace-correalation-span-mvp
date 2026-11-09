@@ -620,26 +620,28 @@ versioned fixture dataset.
 
 ## Scope and limitations
 
-When `PERSISTENCE_BACKEND=postgres` is selected, both APIs use PostgreSQL.
-The Inventory API stores its catalog, balances, reservations, idempotency
-results, and append-only movement journal. The Order API stores each order's
-pending state and terminal business outcome (processed, rejected, declined,
-or compensation-incomplete), including the requested product ID when catalog
-lookup fails. The balance is an operational projection and can be
-reconciled against the movement journal; the journal is a domain audit record,
-not full event sourcing. The in-memory `InventoryStore` remains available for
-unit tests and explicit development use. PostgreSQL row locks and balance constraints protect the multi-statement
-inventory writes. The PostgreSQL integration suite now covers multi-process
-contention, idempotent retries, transaction rollback, and balance constraints;
-see [the inventory concurrency contract](docs/inventory-concurrency.md).
-Supplier
+When `PERSISTENCE_BACKEND=postgres` is selected, the Order API, Inventory API,
+and Supplier Simulator use PostgreSQL. The Inventory API stores its catalog,
+balances, reservations, idempotency results, and append-only movement journal.
+The Order API stores each order's pending state and terminal business outcome
+(processed, rejected, declined, or compensation-incomplete), including the
+requested product ID when catalog lookup fails. The balance is an operational
+projection and can be reconciled against the movement journal; the journal is a
+domain audit record, not full event sourcing. The in-memory `InventoryStore`
+remains available for unit tests and explicit development use. PostgreSQL row
+locks and balance constraints protect the multi-statement inventory writes.
+The PostgreSQL integration suite covers multi-process contention, idempotent
+retries, transaction rollback, and balance constraints; see [the inventory
+concurrency contract](docs/inventory-concurrency.md).
+
 The Supplier Simulator persists fixture offerings, Inventory product
 onboarding references, reorder policies, purchase-order headers and lines,
-append-only transition history, and its simulated clock when PostgreSQL is
-selected. It remains the owner of supplier state; Inventory API remains the
-only authority for stock balances and receipts. The demo payment gateway
-remains a process-local simulation: persisting a payment reference on the order
-does not make payment state or external payment effects durable.
+append-only transition history, and its simulated clock. It owns supplier
+state; Inventory API remains the only authority for stock balances and
+receipts. See [the supplier lifecycle persistence design](docs/supplier-lifecycle-persistence.md).
+The demo payment gateway remains a process-local simulation: persisting a
+payment reference on the order does not make payment state or external payment
+effects durable.
 
 This MVP sends traces directly to Jaeger and writes logs to container stdout;
 selected structured logs are also stored in append-only raw JSONL files by the
