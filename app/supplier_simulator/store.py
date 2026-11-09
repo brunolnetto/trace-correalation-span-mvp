@@ -344,6 +344,7 @@ class SupplierSimulation:
                     "due_at": None,
                     "receiving_started_at": None,
                     "received_at": None,
+                    "cancelled_at": None,
                     "receipt_id": None,
                     "policy_version": policy["version"],
                 }
