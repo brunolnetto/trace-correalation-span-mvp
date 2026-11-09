@@ -40,7 +40,9 @@ jobs:
         run: uv sync --locked --all-groups
       - name: Validate Compose and reproduction shell
         run: |
-          bash -n scripts/reproduce-local.sh
+          bash -n scripts/reproduce-local.sh scripts/prepare-dev-env.sh docker/keycloak-configure.sh
+          bash scripts/prepare-dev-env.sh
+          trap 'rm -f .env' EXIT
           docker compose config --quiet
           docker run --rm \
             -v "$PWD/docker/otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro" \
