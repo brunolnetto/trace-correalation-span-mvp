@@ -87,7 +87,7 @@ ensure_client outbox-dispatcher "$OUTBOX_DISPATCHER_CLIENT_SECRET" \
 ensure_client order-generator "$ORDER_GENERATOR_CLIENT_SECRET" \
   "orders:process events:ingest"
 ensure_client standalone-runner "$STANDALONE_RUNNER_CLIENT_SECRET" \
-  "catalog:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest"
+  "catalog:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest events:read"
 ensure_client local-developer "$LOCAL_DEVELOPER_CLIENT_SECRET" "$ALL_SCOPES"
 
 echo "Configured local OIDC realm '$REALM' and independent service clients."
