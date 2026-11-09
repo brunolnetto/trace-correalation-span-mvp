@@ -11,6 +11,8 @@ from uuid import uuid4
 
 import httpx
 
+from app.security import service_authorization_headers_sync
+
 # Only explicitly named business events enter the analytical Event Collector.
 # Diagnostic logs remain on stdout and are queried through the telemetry path.
 BUSINESS_EVENT_NAMES = frozenset(
@@ -148,6 +150,7 @@ class AsyncCollectorHandler(logging.Handler):
                     response = client.post(
                         f"{self.collector_url}/v1/events",
                         json={"events": batch},
+                        headers=service_authorization_headers_sync("events:ingest"),
                     )
                     response.raise_for_status()
                 return True
