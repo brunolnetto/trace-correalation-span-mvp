@@ -32,6 +32,46 @@ fi
 ALL_AUDIENCES="order-api inventory-api supplier-simulator event-collector outbox-dispatcher"
 ALL_SCOPES="catalog:read catalog:write orders:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive inventory:adjust suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest events:read operations:read"
 
+ensure_scope() {
+  local scope="$1"
+  local scope_file json_file scopes_json scope_id line
+
+  scope_file="\${scope//:/_}"
+  json_file="/tmp/keycloak-scope-\${scope_file}-$$.json"
+  {
+    printf '{\n'
+    printf '  "name": "%s",\n' "$scope"
+    printf '  "protocol": "openid-connect",\n'
+    printf '  "attributes": {\n'
+    printf '    "include.in.token.scope": "true",\n'
+    printf '    "display.on.consent.screen": "false"\n'
+    printf '  }\n'
+    printf '}\n'
+  } > "$json_file"
+
+  scopes_json="$("$KCADM" get client-scopes -r "$REALM" -q "name=$scope" 2>/dev/null || true)"
+  scope_id=""
+  while IFS= read -r line; do
+    if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
+      scope_id="\${BASH_REMATCH[1]}"
+      break
+    fi
+  done <<< "$scopes_json"
+
+  if [[ -n "$scope_id" ]]; then
+    if ! "$KCADM" update "client-scopes/$scope_id" -r "$REALM" -f "$json_file"; then
+      rm -f "$json_file"
+      return 1
+    fi
+  else
+    if ! "$KCADM" create client-scopes -r "$REALM" -f "$json_file"; then
+      rm -f "$json_file"
+      return 1
+    fi
+  fi
+  rm -f "$json_file"
+}
+
 ensure_client() {
   local client="$1"
   local secret="$2"
@@ -39,7 +79,7 @@ ensure_client() {
   local audiences="$4"
   local json_file client_uuid clients_json line
 
-  json_file="/tmp/keycloak-client-${client}-$.json"
+  json_file="/tmp/keycloak-client-\${client}-$$.json"
   {
     printf '{\n'
     printf '  "clientId": "%s",\n' "$client"
@@ -54,8 +94,14 @@ ensure_client() {
     printf '  "standardFlowEnabled": false,\n'
     printf '  "directAccessGrantsEnabled": false,\n'
     printf '  "implicitFlowEnabled": false,\n'
+    printf '  "optionalClientScopes": ['
+    local first=1 scope
+    for scope in $scopes; do
+      if (( first )); then first=0; else printf ', '; fi
+      printf '"%s"' "$scope"
+    done
+    printf '],\n'
     printf '  "protocolMappers": [\n'
-    printf '    {"name":"api-scope-claim","protocol":"openid-connect","protocolMapper":"oidc-hardcoded-claim-mapper","consentRequired":false,"config":{"claim.name":"scope","claim.value":"%s","jsonType.label":"String","access.token.claim":"true","introspection.token.claim":"true","id.token.claim":"false","userinfo.token.claim":"false"}},\n' "$scopes"
 
     local first=1 audience
     for audience in $audiences; do
@@ -70,7 +116,7 @@ ensure_client() {
   client_uuid=""
   while IFS= read -r line; do
     if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
-      client_uuid="${BASH_REMATCH[1]}"
+      client_uuid="\${BASH_REMATCH[1]}"
       break
     fi
   done <<< "$clients_json"
@@ -88,6 +134,10 @@ ensure_client() {
   fi
   rm -f "$json_file"
 }
+
+for scope in $ALL_SCOPES; do
+  ensure_scope "$scope"
+done
 
 ensure_client order-api "$ORDER_API_CLIENT_SECRET" \
   "catalog:read inventory:read inventory:reserve inventory:fulfill events:ingest" \
