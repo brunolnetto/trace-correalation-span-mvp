@@ -75,7 +75,7 @@ ensure_client() {
 }
 
 ensure_client order-api "$ORDER_API_CLIENT_SECRET" \
-  "catalog:read inventory:reserve inventory:fulfill events:ingest"
+  "catalog:read inventory:read inventory:reserve inventory:fulfill events:ingest"
 ensure_client inventory-api "$INVENTORY_API_CLIENT_SECRET" \
   "events:ingest"
 ensure_client supplier-simulator "$SUPPLIER_SIMULATOR_CLIENT_SECRET" \
