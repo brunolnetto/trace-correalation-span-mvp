@@ -12,12 +12,13 @@ from app.event_collector.store import (
     RawEvent,
 )
 from app.observability import configure_observability
-from app.security import authenticate_request
+from app.security import authenticate_request, swagger_oauth_config
 
 app = FastAPI(
     title="Raw Event Collector",
     description="Versioned, append-only JSONL event ingestion with quarantine.",
     version="0.1.0",
+    swagger_ui_init_oauth=swagger_oauth_config(),
 )
 configure_observability(app, os.getenv("SERVICE_NAME", "event-collector"))
 
