@@ -55,6 +55,10 @@ services:
       LOCAL_DEVELOPER_CLIENT_SECRET: ${LOCAL_DEVELOPER_CLIENT_SECRET:?Run scripts/prepare-dev-env.sh before starting Compose}
       LOCAL_DEVELOPER_PASSWORD: ${LOCAL_DEVELOPER_PASSWORD:?Run scripts/prepare-dev-env.sh before starting Compose}
       LOCAL_DEVELOPER_USERNAME: ${LOCAL_DEVELOPER_USERNAME:-local-user}
+      ORDER_API_HOST_PORT: ${ORDER_API_HOST_PORT:-18000}
+      INVENTORY_API_HOST_PORT: ${INVENTORY_API_HOST_PORT:-18001}
+      SUPPLIER_HOST_PORT: ${SUPPLIER_HOST_PORT:-18002}
+      EVENT_COLLECTOR_HOST_PORT: ${EVENT_COLLECTOR_HOST_PORT:-18003}
     volumes:
       - ./docker/keycloak-configure.sh:/opt/keycloak/bootstrap/configure.sh:ro
     depends_on:
