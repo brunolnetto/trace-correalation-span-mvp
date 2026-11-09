@@ -99,10 +99,6 @@ class PostgresOrderSagaRepository:
         pool = self.database.pool
         if pool is None:
             raise RuntimeError("PostgreSQL pool is not open")
-        if pool.max_size < 2:
-            raise RuntimeError(
-                "Durable Order Saga execution requires DATABASE_POOL_MAX_SIZE >= 2"
-            )
 
         async with pool.connection() as connection:
             cursor = await connection.execute(
@@ -112,15 +108,24 @@ class PostgresOrderSagaRepository:
             row = await cursor.fetchone()
             await connection.commit()
             acquired = bool(row and row["acquired"])
+            token = (
+                self.database.bind_connection(connection)
+                if acquired
+                else None
+            )
             try:
                 yield acquired
             finally:
-                if acquired:
-                    await connection.execute(
-                        "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
-                        (f"order-saga:{saga_id}",),
-                    )
-                    await connection.commit()
+                try:
+                    if acquired:
+                        await connection.execute(
+                            "SELECT pg_advisory_unlock(hashtextextended(%s, 0))",
+                            (f"order-saga:{saga_id}",),
+                        )
+                        await connection.commit()
+                finally:
+                    if token is not None:
+                        self.database.reset_connection(token)
 
     async def start_or_load(self, context: dict[str, Any]) -> dict[str, Any]:
         """Atomically claim an order ID or load the matching prior execution."""
