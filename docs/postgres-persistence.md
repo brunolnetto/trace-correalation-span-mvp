@@ -1,13 +1,13 @@
 # PostgreSQL persistence foundation
 
-This document tracks issue #21. PostgreSQL is the durable source of truth for Order, Inventory, and Supplier
-business state. The Event Collector and dbt remain observability and analytics
+This document tracks issue #21. PostgreSQL is the durable source of truth for
+Order, Inventory, and Supplier business state. The Event Collector and dbt remain observability and analytics
 products, never write authorities.
 
 ## Decisions
 
-- Use one PostgreSQL database for the Order and Inventory domains. Do not
-  introduce a generic multi-database abstraction.
+- Use one PostgreSQL database for the Order, Inventory, and Supplier domains.
+  Do not introduce a generic multi-database abstraction.
 - Keep HTTP routes independent of SQL and connection management. Both the
   in-memory `InventoryStore` and `PostgresInventoryStore` implement the
   application-facing `InventoryStorePort`.
