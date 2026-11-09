@@ -270,8 +270,9 @@ inventory_position = on_hand - reserved + on_order
 
 When inventory position is at or below the reorder point, the simulator creates
 one purchase order for `target_stock - inventory_position` units. An existing
-created or ordered PO suppresses duplicate reorder decisions. This accounts
-for already-committed reservations without treating them as available units.
+`created`, `ordered`, or `receiving` PO suppresses duplicate reorder
+decisions. This accounts for already-committed reservations without treating
+them as available units.
 
 Evaluate all configured policies or just one product:
 
@@ -280,7 +281,7 @@ curl -X POST http://localhost:18002/replenishments/evaluate
 curl -X POST 'http://localhost:18002/replenishments/evaluate?product_id=8'
 ```
 
-Purchase orders follow `created -> ordered -> received` or
+Purchase orders follow `created -> ordered -> receiving -> received` or
 `created -> cancelled`. Ordering records a due time based on the policy's
 lead time. The simulation clock can be advanced explicitly, so tests do not
 sleep while waiting for supplier deliveries:
@@ -309,9 +310,11 @@ transition history is available at
 See [the supplier persistence and recovery guide](docs/supplier-persistence.md)
 for state ownership, lifecycle, uniqueness, and crash-recovery semantics.
 
-Run the full supplier stack with:
+Apply the shared database migrations before starting the APIs:
 
 ```bash
+docker compose up --detach --wait postgres
+bash scripts/migrate.sh
 docker compose up --build --detach
 ```
 
@@ -616,7 +619,8 @@ versioned fixture dataset.
 
 ## Scope and limitations
 
-When `PERSISTENCE_BACKEND=postgres` is selected, both APIs use PostgreSQL.
+When `PERSISTENCE_BACKEND=postgres` is selected, Order API, Inventory API,
+and Supplier Simulation use PostgreSQL through independent connection pools.
 The Inventory API stores its catalog, balances, reservations, idempotency
 results, and append-only movement journal. The Order API stores each order's
 pending state and terminal business outcome (processed, rejected, declined,
