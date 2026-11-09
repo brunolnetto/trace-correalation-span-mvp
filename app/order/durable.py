@@ -387,6 +387,41 @@ class PostgresOrderSagaRepository:
                     saga_id,
                 ),
             )
+            order_status = {
+                "running": "pending",
+                "compensating": "pending",
+                "completed": "processed",
+                "rolled_back": failure_category or "failed",
+                "reconciliation_required": "compensation_incomplete",
+            }[status]
+            await connection.execute(
+                """
+                UPDATE orders AS o
+                SET status = %s,
+                    failure_category = CASE
+                        WHEN %s IN ('completed', 'running', 'compensating')
+                            THEN NULL
+                        ELSE COALESCE(%s, o.failure_category)
+                    END,
+                    reservation_id = COALESCE(
+                        NULLIF(e.context->>'reservation_id', '')::uuid,
+                        o.reservation_id
+                    ),
+                    payment_id = COALESCE(
+                        NULLIF(e.context->>'payment_id', ''),
+                        o.payment_id
+                    ),
+                    updated_at = now()
+                FROM order_saga_executions AS e
+                WHERE e.saga_id = %s AND o.order_id = e.order_id
+                """,
+                (
+                    order_status,
+                    status,
+                    failure_category,
+                    saga_id,
+                ),
+            )
 
     async def mark_compensation_started(
         self, saga_id: str, step_name: str
