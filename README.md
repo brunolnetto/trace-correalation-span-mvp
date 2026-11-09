@@ -270,8 +270,9 @@ inventory_position = on_hand - reserved + on_order
 
 When inventory position is at or below the reorder point, the simulator creates
 one purchase order for `target_stock - inventory_position` units. An existing
-created or ordered PO suppresses duplicate reorder decisions. This accounts
-for already-committed reservations without treating them as available units.
+`created`, `ordered`, or `receiving` PO suppresses duplicate reorder
+decisions. This accounts for already-committed reservations without treating
+them as available units.
 
 Evaluate all configured policies or just one product:
 
@@ -280,7 +281,7 @@ curl -X POST http://localhost:18002/replenishments/evaluate
 curl -X POST 'http://localhost:18002/replenishments/evaluate?product_id=8'
 ```
 
-Purchase orders follow `created -> ordered -> received` or
+Purchase orders follow `created -> ordered -> receiving -> received` or
 `created -> cancelled`. Ordering records a due time based on the policy's
 lead time. The simulation clock can be advanced explicitly, so tests do not
 sleep while waiting for supplier deliveries:
@@ -292,15 +293,28 @@ curl -X POST http://localhost:18002/clock/advance \
 curl -X POST http://localhost:18002/purchase-orders/<po-id>/receive
 ```
 
-Receiving sends an idempotent receipt to Inventory API using
-`supplier-po:<purchase_order_id>`. Replaying a receive after a supplier
-simulator restart can therefore safely replay the same inventory receipt,
-provided the purchase order record is restored; supplier policies and PO
-records themselves remain process-local in this MVP.
+Supplier offerings, onboarding references, reorder policies, purchase orders,
+PO line snapshots, lifecycle transitions, and the simulated clock are persisted
+in PostgreSQL. The Inventory API remains the sole owner of product and stock
+state; Supplier never writes Inventory tables or balances directly.
 
-Run the full supplier stack with:
+Receiving persists `ordered -> receiving` before calling Inventory API with
+the stable idempotency key `supplier-po:<purchase_order_id>`. After Inventory
+returns its receipt ID, Supplier persists `receiving -> received`. If the
+Supplier process crashes before or after Inventory commits, a restarted
+instance can retry the PO from `receiving` with the same key. Inventory
+replays the original receipt instead of crediting stock twice. Purchase-order
+transition history is available at
+`GET /purchase-orders/{purchase_order_id}/transitions`.
+
+See [the supplier persistence and recovery guide](docs/supplier-persistence.md)
+for state ownership, lifecycle, uniqueness, and crash-recovery semantics.
+
+Apply the shared database migrations before starting the APIs:
 
 ```bash
+docker compose up --detach --wait postgres
+bash scripts/migrate.sh
 docker compose up --build --detach
 ```
 
@@ -457,11 +471,12 @@ docker compose down -v
 ```
 
 **Warning:** `down -v` deletes the PostgreSQL business database (products,
-orders, balances, reservations, idempotency records, and movement journal),
-Collector event history, simulation and analytics reports, DuckDB database,
-and all other named-volume data. It is a destructive local reset, not part of
-the normal standalone wrapper. For configuration, scenario invariants,
-failure semantics, and report details, see
+orders, balances, reservations, idempotency records, movement journal,
+supplier offerings, onboarding references, reorder policies, purchase orders,
+and transition history), Collector event history, simulation and analytics
+reports, DuckDB database, and all other named-volume data. It is a destructive
+local reset, not part of the normal standalone wrapper. For configuration,
+scenario invariants, failure semantics, and report details, see
 [the standalone execution guide](docs/standalone-execution.md).
 
 ## Reproduce locally (recommended)
@@ -605,7 +620,8 @@ versioned fixture dataset.
 
 ## Scope and limitations
 
-When `PERSISTENCE_BACKEND=postgres` is selected, both APIs use PostgreSQL.
+When `PERSISTENCE_BACKEND=postgres` is selected, Order API, Inventory API,
+and Supplier Simulation use PostgreSQL through independent connection pools.
 The Inventory API stores its catalog, balances, reservations, idempotency
 results, and append-only movement journal. The Order API stores each order's
 pending state and terminal business outcome (processed, rejected, declined,
@@ -617,9 +633,8 @@ unit tests and explicit development use. PostgreSQL row locks and balance constr
 inventory writes. The PostgreSQL integration suite now covers multi-process
 contention, idempotent retries, transaction rollback, and balance constraints;
 see [the inventory concurrency contract](docs/inventory-concurrency.md).
-Supplier
-policies and purchase-order lifecycle persistence remain in issue #23. The
-demo payment gateway remains a process-local simulation: persisting a payment
+Supplier policy and purchase-order state are persisted in PostgreSQL;
+the demo payment gateway remains a process-local simulation: persisting a payment
 reference on the order does not make payment state or external payment effects
 durable.
 
