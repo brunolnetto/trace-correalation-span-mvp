@@ -99,6 +99,10 @@ class PostgresOrderSagaRepository:
         pool = self.database.pool
         if pool is None:
             raise RuntimeError("PostgreSQL pool is not open")
+        if pool.max_size < 2:
+            raise RuntimeError(
+                "Durable Order Saga execution requires DATABASE_POOL_MAX_SIZE >= 2"
+            )
 
         async with pool.connection() as connection:
             cursor = await connection.execute(
@@ -553,6 +557,10 @@ class PostgresPaymentGateway:
         should_decline = amount > self.decline_above
 
         async with self.database.connection() as connection:
+            await connection.execute(
+                "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+                (f"order-payment:{payment_id}",),
+            )
             cursor = await connection.execute(
                 """
                 SELECT *
@@ -838,7 +846,17 @@ class DurableOrderExecutor:
             except DurableOrderFailure:
                 recovered += 1
             except Exception:
-                latest = await self.repository.get(record["saga_id"])
+                try:
+                    latest = await self.repository.get(record["saga_id"])
+                except Exception:
+                    latest = None
+                    logger.exception(
+                        "order.saga.recovery_status_check_failed",
+                        extra={
+                            "saga_id": record["saga_id"],
+                            "order_id": record["order_id"],
+                        },
+                    )
                 if latest and latest["status"] in {
                     "completed",
                     "rolled_back",
