@@ -28,6 +28,7 @@ BUSINESS_EVENT_NAMES = frozenset(
         "inventory.reservation.committed",
         "inventory.reservation.released",
         "supplier.product.onboarded",
+        "supplier.reorder_policy.created",
         "supplier.reorder_policy.updated",
         "supplier.replenishment.evaluated",
         "supplier.purchase_order.ordered",
