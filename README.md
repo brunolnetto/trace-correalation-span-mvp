@@ -641,6 +641,44 @@ movement behavior and balance/journal reconciliation. CI provisions a
 PostgreSQL service for these tests. CI also builds the dbt project against its
 versioned fixture dataset.
 
+## Authentication and authorization
+
+The APIs use OIDC access tokens and OAuth 2.0 scopes. Protected routes return
+401 when no valid Bearer token is supplied and 403 when the authenticated
+identity lacks the required scope. The OpenAPI document publishes Authorization
+Code and Client Credentials flows and the scope required by each route.
+
+The local Compose environment includes a development-only Keycloak realm.
+Generate ignored local credentials before starting the stack manually:
+
+```bash
+bash scripts/prepare-dev-env.sh
+docker compose up --build --detach
+```
+
+The local issuer is `http://localhost:18080/realms/trace-local`. Compose
+provisions separate confidential clients for the APIs, outbox dispatcher,
+order generator, standalone runner, and a broad `local-developer` operator
+identity. Client secrets are generated into the ignored `.env` file; they
+are not part of the repository or container images. The operator client is
+for local reproduction only and is not a substitute for a human login.
+
+The reproduction script creates this local environment and obtains its
+operator token automatically:
+
+```bash
+POSTGRES_HOST_PORT=25434 bash scripts/reproduce-local.sh --cleanup
+```
+
+For non-local deployments, configure `OIDC_ISSUER`, `OIDC_TOKEN_URL`,
+`OIDC_INTROSPECTION_URL`, `OIDC_AUDIENCE`, `OIDC_CLIENT_ID`,
+`OIDC_CLIENT_SECRET`, and `OIDC_SERVICE_SCOPES` from the deployment's
+secret/configuration system. Production endpoints must use HTTPS. Do not use
+the Keycloak `start-dev` service or generated local client secrets outside
+the development Compose environment. See
+[the API security design](docs/api-security-design.md) for the scope matrix
+and service identities.
+
 ## Scope and limitations
 
 When `PERSISTENCE_BACKEND=postgres` is selected, Order API, Inventory API,
@@ -676,8 +714,7 @@ Collector remains the business-event sink for dbt analytics; its producer
 queue is best-effort before acknowledgement. The outbox dispatcher separately
 provides durable at-least-once delivery for transactional domain events.
 
-API authentication and domain-level authorization are not implemented yet;
-they are tracked in [issue #27](https://github.com/brunolnetto/trace-correalation-span-mvp/issues/27).
+API authentication and domain-level authorization are implemented with OIDC introspection and per-route scopes; local Keycloak provisioning and service identities are described above.
 Production deployment hardening is tracked in issue #29. The payment gateway
 remains a deterministic local simulator; real provider integration is tracked
 in issue #28.
