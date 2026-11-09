@@ -209,7 +209,7 @@ class SupplierSimulation:
                     order
                     for order in self._purchase_orders.values()
                     if order["product_id"] == current_product_id
-                    and order["status"] in {"created", "ordered"}
+                    and order["status"] in {"created", "ordered", "receiving"}
                 ]
                 on_order = sum(order["quantity"] for order in active_orders)
                 available = int(inventory["on_hand"]) - int(inventory["reserved"])
@@ -280,6 +280,7 @@ class SupplierSimulation:
                     "created_at": self._now_iso(),
                     "ordered_at": None,
                     "due_at": None,
+                    "receiving_started_at": None,
                     "received_at": None,
                     "receipt_id": None,
                     "policy_version": policy["version"],
@@ -339,14 +340,21 @@ class SupplierSimulation:
                 raise KeyError(f"Purchase order {purchase_order_id} does not exist")
             if order["status"] == "received":
                 return order.copy()
-            if order["status"] != "ordered":
-                raise ValueError("Only ordered purchase orders can be received")
-            due_at = datetime.fromisoformat(order["due_at"])
-            if self._now < due_at:
-                raise ValueError("Supplier lead time has not elapsed")
+            if order["status"] == "ordered":
+                due_at = datetime.fromisoformat(order["due_at"])
+                if self._now < due_at:
+                    raise ValueError("Supplier lead time has not elapsed")
+                order["status"] = "receiving"
+                order["receiving_started_at"] = self._now_iso()
+            elif order["status"] != "receiving":
+                raise ValueError(
+                    "Only ordered or receiving purchase orders can be received"
+                )
             product_id = order["product_id"]
             quantity = order["quantity"]
 
+        # The stable Inventory idempotency key makes this safe to retry after
+        # the stock commit succeeds but the response or supplier checkpoint is lost.
         response = await client.post(
             f"/inventory/{product_id}/receipts",
             json={
@@ -363,6 +371,8 @@ class SupplierSimulation:
             order = self._purchase_orders[purchase_order_id]
             if order["status"] == "received":
                 return order.copy()
+            if order["status"] != "receiving":
+                raise RuntimeError("Purchase order left receiving state unexpectedly")
             order["status"] = "received"
             order["received_at"] = self._now_iso()
             order["receipt_id"] = receipt["receipt_id"]
