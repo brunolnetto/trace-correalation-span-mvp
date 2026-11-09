@@ -867,6 +867,32 @@ class PostgresSupplierSimulation:
         receipt_id = str(receipt["receipt_id"])
 
         async with self.database.connection() as connection:
+            # Evaluation locks policy -> PO. Receipt finalization uses the same
+            # order to avoid a policy/PO deadlock under concurrent evaluation.
+            cursor = await connection.execute(
+                """
+                SELECT product_id
+                FROM supplier_purchase_orders
+                WHERE purchase_order_id = %s
+                """,
+                (purchase_order_uuid,),
+            )
+            identity = await cursor.fetchone()
+            if identity is None:
+                raise KeyError(
+                    f"Purchase order {purchase_order_id} does not exist"
+                )
+            cursor = await connection.execute(
+                """
+                SELECT product_id
+                FROM supplier_reorder_policies
+                WHERE product_id = %s
+                FOR UPDATE
+                """,
+                (identity["product_id"],),
+            )
+            if await cursor.fetchone() is None:
+                raise RuntimeError("Purchase order has no persisted reorder policy")
             cursor = await connection.execute(
                 """
                 SELECT status
