@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from decimal import Decimal
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
 import psycopg
