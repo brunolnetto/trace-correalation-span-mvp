@@ -149,6 +149,128 @@ for scope in $ALL_SCOPES; do
   ensure_scope "$scope"
 done
 
+ensure_browser_client() {
+  local audiences="$1"
+  local client="local-web"
+  local json_file client_uuid clients_json line
+
+  json_file="/tmp/keycloak-client-\${client}-$BASHPID.json"
+  TEMP_FILES+=("$json_file")
+  {
+    printf '{\n'
+    printf '  "clientId": "%s",\n' "$client"
+    printf '  "name": "Local development browser login",\n'
+    printf '  "description": "Development-only public OIDC client using Authorization Code with PKCE.",\n'
+    printf '  "enabled": true,\n'
+    printf '  "protocol": "openid-connect",\n'
+    printf '  "publicClient": true,\n'
+    printf '  "serviceAccountsEnabled": false,\n'
+    printf '  "standardFlowEnabled": true,\n'
+    printf '  "directAccessGrantsEnabled": false,\n'
+    printf '  "implicitFlowEnabled": false,\n'
+    printf '  "attributes": {"pkce.code.challenge.method":"S256"},\n'
+    printf '  "redirectUris": [\n'
+    printf '    "http://localhost:%s/docs/oauth2-redirect",\n' "$ORDER_API_HOST_PORT"
+    printf '    "http://localhost:%s/docs/oauth2-redirect",\n' "$INVENTORY_API_HOST_PORT"
+    printf '    "http://localhost:%s/docs/oauth2-redirect",\n' "$SUPPLIER_HOST_PORT"
+    printf '    "http://localhost:%s/docs/oauth2-redirect"\n' "$EVENT_COLLECTOR_HOST_PORT"
+    printf '  ],\n'
+    printf '  "webOrigins": [\n'
+    printf '    "http://localhost:%s",\n' "$ORDER_API_HOST_PORT"
+    printf '    "http://localhost:%s",\n' "$INVENTORY_API_HOST_PORT"
+    printf '    "http://localhost:%s",\n' "$SUPPLIER_HOST_PORT"
+    printf '    "http://localhost:%s"\n' "$EVENT_COLLECTOR_HOST_PORT"
+    printf '  ],\n'
+    printf '  "optionalClientScopes": ['
+    local first=1 scope
+    for scope in $ALL_SCOPES; do
+      if (( first )); then first=0; else printf ', '; fi
+      printf '"%s"' "$scope"
+    done
+    printf '],\n'
+    printf '  "protocolMappers": [\n'
+
+    first=1
+    local audience
+    for audience in $audiences; do
+      if (( first )); then first=0; else printf ',\n'; fi
+      printf '    {"name":"audience-%s","protocol":"openid-connect","protocolMapper":"oidc-audience-mapper","consentRequired":false,"config":{"included.client.audience":"%s","id.token.claim":"false","access.token.claim":"true","introspection.token.claim":"true"}}' "$audience" "$audience"
+    done
+    printf '\n  ]\n'
+    printf '}\n'
+  } > "$json_file"
+
+  clients_json="$($KCADM get clients -r "$REALM" -q "clientId=$client" 2>/dev/null || true)"
+  client_uuid=""
+  while IFS= read -r line; do
+    if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
+      client_uuid="\${BASH_REMATCH[1]}"
+      break
+    fi
+  done <<< "$clients_json"
+
+  if [[ -n "$client_uuid" ]]; then
+    if ! $KCADM update "clients/$client_uuid" -r "$REALM" -f "$json_file"; then
+      return 1
+    fi
+  else
+    if ! $KCADM create clients -r "$REALM" -f "$json_file"; then
+      return 1
+    fi
+  fi
+}
+
+ensure_local_user() {
+  local username="$LOCAL_DEVELOPER_USERNAME"
+  local users_json user_uuid line user_file password_file
+
+  user_file="/tmp/keycloak-user-$BASHPID.json"
+  password_file="/tmp/keycloak-password-$BASHPID.json"
+  TEMP_FILES+=("$user_file" "$password_file")
+  {
+    printf '{\n'
+    printf '  "username": "%s",\n' "$username"
+    printf '  "enabled": true,\n'
+    printf '  "emailVerified": true,\n'
+    printf '  "firstName": "Local",\n'
+    printf '  "lastName": "Developer",\n'
+    printf '  "email": "%s@localhost"\n' "$username"
+    printf '}\n'
+  } > "$user_file"
+
+  users_json="$($KCADM get users -r "$REALM" -q "username=$username" 2>/dev/null || true)"
+  user_uuid=""
+  while IFS= read -r line; do
+    if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
+      user_uuid="\${BASH_REMATCH[1]}"
+      break
+    fi
+  done <<< "$users_json"
+
+  if [[ -n "$user_uuid" ]]; then
+    $KCADM update "users/$user_uuid" -r "$REALM" -f "$user_file"
+  else
+    $KCADM create users -r "$REALM" -f "$user_file"
+    users_json="$($KCADM get users -r "$REALM" -q "username=$username")"
+    while IFS= read -r line; do
+      if [[ "$line" =~ \"id\"[[:space:]]*:[[:space:]]*\"([^\"]+)\" ]]; then
+        user_uuid="\${BASH_REMATCH[1]}"
+        break
+      fi
+    done <<< "$users_json"
+  fi
+
+  if [[ -z "$user_uuid" ]]; then
+    echo "Could not resolve the local development user after provisioning" >&2
+    return 1
+  fi
+
+  printf '{"type":"password","value":"%s","temporary":false}\n' \
+    "$LOCAL_DEVELOPER_PASSWORD" > "$password_file"
+  $KCADM update "users/$user_uuid/reset-password" -r "$REALM" \
+    -f "$password_file" -n
+}
+
 # First create every client without audience references. Audience mapper client IDs
 # must already exist in the realm before the second pass configures those mappers.
 ensure_client order-api "$ORDER_API_CLIENT_SECRET" \
@@ -163,6 +285,7 @@ ensure_client order-generator "$ORDER_GENERATOR_CLIENT_SECRET" \
 ensure_client standalone-runner "$STANDALONE_RUNNER_CLIENT_SECRET" \
   "catalog:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest events:read" ""
 ensure_client local-developer "$LOCAL_DEVELOPER_CLIENT_SECRET" "$ALL_SCOPES" ""
+ensure_browser_client ""
 
 ensure_client order-api "$ORDER_API_CLIENT_SECRET" \
   "catalog:read inventory:read inventory:reserve inventory:fulfill events:ingest" \
@@ -186,5 +309,7 @@ ensure_client standalone-runner "$STANDALONE_RUNNER_CLIENT_SECRET" \
   "catalog:read orders:process inventory:read inventory:reserve inventory:fulfill inventory:receive suppliers:read suppliers:manage suppliers:evaluate simulation:control events:ingest events:read" \
   "inventory-api order-api supplier-simulator event-collector"
 ensure_client local-developer "$LOCAL_DEVELOPER_CLIENT_SECRET" "$ALL_SCOPES" "$ALL_AUDIENCES"
+ensure_browser_client "$ALL_AUDIENCES"
+ensure_local_user
 
-echo "Configured local OIDC realm '$REALM' and independent service clients."
+echo "Configured local OIDC realm '$REALM', service clients, and PKCE browser login."
