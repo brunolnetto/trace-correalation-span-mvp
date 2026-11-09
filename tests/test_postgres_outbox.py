@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from collections.abc import Iterator
-from typing import Any
 from decimal import Decimal
+from typing import Any
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
@@ -300,7 +301,7 @@ async def test_multiple_dispatchers_claim_disjoint_batches_and_expired_leases_re
             await insert_outbox_event(database, aggregate_id=f"aggregate-{index}")
             for index in range(6)
         }
-        first, second = await __import__("asyncio").gather(
+        first, second = await asyncio.gather(
             repository.claim_batch(
                 lease_owner="worker-a",
                 batch_size=4,
