@@ -155,7 +155,9 @@ class PostgresSupplierSimulation:
         self, client: httpx.AsyncClient, sku: str, correlation_id: str
     ) -> dict[str, Any] | None:
         response = await client.get(
-            "/products", headers={"X-Correlation-ID": correlation_id}
+            "/products",
+            params={"include_inactive": "true"},
+            headers={"X-Correlation-ID": correlation_id},
         )
         response.raise_for_status()
         return next(
@@ -276,7 +278,11 @@ class PostgresSupplierSimulation:
                     lead_time_seconds, version, created_at, updated_at
                 )
                 VALUES (%s, %s, %s, %s, %s, 1, %s, %s)
-                ON CONFLICT (product_id) DO NOTHING
+                ON CONFLICT (product_id) DO UPDATE
+                SET supplier_sku = COALESCE(
+                    supplier_reorder_policies.supplier_sku,
+                    EXCLUDED.supplier_sku
+                )
                 """,
                 (
                     product_id,
