@@ -115,12 +115,30 @@ wait_for_url() {
   echo "    ready: $description"
 }
 
+wait_for_internal_service() {
+  local service="$1"
+  local health_url="$2"
+  local deadline=$((SECONDS + WAIT_SECONDS))
+  until docker compose exec --no-TTY "$service" python -c \
+    "import urllib.request; urllib.request.urlopen('$health_url', timeout=2)" \
+    >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      docker compose ps >&2 || true
+      docker compose logs --tail=100 "$service" >&2 || true
+      die "Timed out waiting for $service at $health_url"
+    fi
+    sleep 2
+  done
+  echo "    ready: $service"
+}
+
 echo "    waiting for service health endpoints (up to ${WAIT_SECONDS}s)"
 wait_for_url "$INVENTORY_URL/healthz" "inventory-api"
 wait_for_url "$ORDER_URL/healthz" "order-api"
 wait_for_url "$JAEGER_URL/" "Jaeger UI"
 wait_for_url "$EVENT_COLLECTOR_URL/healthz" "event-collector"
 wait_for_url "$SUPPLIER_URL/healthz" "supplier-simulator"
+wait_for_internal_service "outbox-dispatcher" "http://127.0.0.1:8011/healthz"
 
 echo "==> 5/7: Exercise catalog, orders, and supplier replenishment"
 curl --silent --show-error --fail \
