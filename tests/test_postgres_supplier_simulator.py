@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from decimal import Decimal
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
@@ -78,6 +79,23 @@ class InventoryHTTPDouble:
 
     def handler(self, request: httpx.Request) -> httpx.Response:
         parts = request.url.path.strip("/").split("/")
+        if request.method == "POST" and parts == ["products"]:
+            payload = json.loads(request.content)
+            existing = next(
+                (
+                    item
+                    for item in self.products.values()
+                    if item["sku"] == payload["sku"]
+                ),
+                None,
+            )
+            if existing is not None:
+                return httpx.Response(409, json={"detail": "duplicate SKU"})
+            product_id = max(self.products, default=0) + 1
+            product = {"product_id": product_id, **payload, "is_active": True}
+            self.products[product_id] = product
+            self.balances[product_id] = {"on_hand": 0, "reserved": 0}
+            return httpx.Response(201, json=product)
         if request.method == "GET" and parts == ["products"]:
             return httpx.Response(200, json=list(self.products.values()))
         if request.method == "GET" and len(parts) == 2 and parts[0] == "products":
@@ -109,7 +127,7 @@ class InventoryHTTPDouble:
         ):
             self.receipt_calls += 1
             product_id = int(parts[1])
-            payload = __import__("json").loads(request.content)
+            payload = json.loads(request.content)
             key = f"{product_id}:{payload['idempotency_key']}"
             if self.fail_next_receipt == "before_commit":
                 self.fail_next_receipt = None
