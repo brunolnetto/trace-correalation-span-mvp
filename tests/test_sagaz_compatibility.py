@@ -13,6 +13,11 @@ class RecordingSagaStorage:
 
     def __init__(self) -> None:
         self.writes: list[dict] = []
+        self.loads: list[str] = []
+
+    async def load_saga_state(self, saga_id: str) -> dict | None:
+        self.loads.append(saga_id)
+        return None
 
     async def save_saga_state(
         self,
@@ -113,3 +118,59 @@ async def test_current_order_workflow_uses_in_memory_sagaz_storage_by_default():
     saga, _tracker = create_order_processing_saga()
 
     assert type(saga._config.storage).__name__ == "InMemorySagaStorage"
+
+@pytest.mark.asyncio
+async def test_reusing_a_saga_id_does_not_load_or_resume_the_existing_record():
+    storage = RecordingSagaStorage()
+    config = SagaConfig(
+        storage=storage,
+        logging=False,
+        metrics=False,
+        tracing=False,
+    )
+    executions = 0
+
+    class ReplayedSideEffectProbe(Saga):
+        saga_name = "persistence-probe-replay"
+
+        @action("record_side_effect")
+        async def record_side_effect(self, context: dict) -> dict:
+            nonlocal executions
+            executions += 1
+            return {"execution_count": executions}
+
+    first = ReplayedSideEffectProbe(config=config)
+    second = ReplayedSideEffectProbe(config=config)
+
+    await first.run({"order_id": 43}, saga_id="same-saga-id")
+    resumed = await second.run({"order_id": 43}, saga_id="same-saga-id")
+
+    assert storage.loads == []
+    assert executions == 2
+    assert resumed["execution_count"] == 2
+    assert [record["status"] for record in storage.writes] == [
+        "executing",
+        "completed",
+        "executing",
+        "completed",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_sagaz_swallows_state_storage_errors_and_continues_execution():
+    class UnavailableStorage:
+        async def save_saga_state(self, *args, **kwargs) -> None:
+            raise ConnectionError("storage unavailable")
+
+    config = SagaConfig(
+        storage=UnavailableStorage(),
+        logging=False,
+        metrics=False,
+        tracing=False,
+    )
+    saga = SuccessfulPersistenceProbe(config=config)
+
+    result = await saga.run({"order_id": 44}, saga_id="storage-unavailable")
+
+    assert result["effect_reference"] == "effect-123"
+
