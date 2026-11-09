@@ -544,6 +544,46 @@ class PostgresSupplierSimulation:
                 connection, policy, inventory
             )
 
+    async def _record_replenishment_decision(
+        self,
+        connection: Any,
+        decision: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Append the decision event in the same transaction as any PO creation."""
+        purchase_order = decision.get("purchase_order") or {}
+        attributes = {
+            "product_id": decision["product_id"],
+            "decision": decision["decision"],
+            "on_hand": decision["on_hand"],
+            "reserved": decision["reserved"],
+            "available_quantity": decision["available_quantity"],
+            "on_order": decision["on_order"],
+            "inventory_position": decision["inventory_position"],
+            "purchase_order_ids": decision.get(
+                "purchase_order_ids",
+                [purchase_order["purchase_order_id"]]
+                if purchase_order.get("purchase_order_id")
+                else [],
+            ),
+            "purchase_order": purchase_order or None,
+        }
+        await connection.execute(
+            """
+            SELECT enqueue_outbox_event(
+                'supplier-simulator',
+                'supplier.replenishment.evaluated',
+                'product',
+                %s,
+                %s
+            )
+            """,
+            (
+                str(decision["product_id"]),
+                Jsonb(attributes),
+            ),
+        )
+        return decision
+
     async def _evaluate_product_in_transaction(
         self,
         connection: Any,
@@ -567,21 +607,30 @@ class PostgresSupplierSimulation:
             "inventory_position": inventory_position,
         }
         if active_orders:
-            return {
-                **common,
-                "decision": "open_purchase_order_exists",
-                "purchase_order_ids": active_order_ids,
-            }
+            return await self._record_replenishment_decision(
+                connection,
+                {
+                    **common,
+                    "decision": "open_purchase_order_exists",
+                    "purchase_order_ids": active_order_ids,
+                },
+            )
         if inventory_position > policy["reorder_point"]:
-            return {
-                **common,
-                "decision": "no_reorder",
-                "purchase_order_ids": [],
-            }
+            return await self._record_replenishment_decision(
+                connection,
+                {
+                    **common,
+                    "decision": "no_reorder",
+                    "purchase_order_ids": [],
+                },
+            )
 
         quantity = int(policy["target_stock"]) - inventory_position
         if quantity <= 0:
-            return {**common, "decision": "no_reorder", "purchase_order_ids": []}
+            return await self._record_replenishment_decision(
+                connection,
+                {**common, "decision": "no_reorder", "purchase_order_ids": []},
+            )
 
         cursor = await connection.execute(
             """
@@ -630,15 +679,19 @@ class PostgresSupplierSimulation:
             # caller bypasses the policy-row serialization convention.
             active_orders = await self._active_orders(connection, product_id)
             on_order = sum(int(order["quantity"]) for order in active_orders)
-            return {
-                **common,
-                "decision": "open_purchase_order_exists",
-                "on_order": on_order,
-                "inventory_position": available + on_order,
-                "purchase_order_ids": [
-                    str(order["purchase_order_id"]) for order in active_orders
-                ],
-            }
+            return await self._record_replenishment_decision(
+                connection,
+                {
+                    **common,
+                    "decision": "open_purchase_order_exists",
+                    "on_order": on_order,
+                    "inventory_position": available + on_order,
+                    "purchase_order_ids": [
+                        str(order["purchase_order_id"])
+                        for order in active_orders
+                    ],
+                },
+            )
 
         cursor = await connection.execute(
             """
@@ -680,11 +733,14 @@ class PostgresSupplierSimulation:
             ),
         )
         order = await self._load_purchase_order(connection, purchase_order_id)
-        return {
-            **common,
-            "decision": "purchase_order_created",
-            "purchase_order": order,
-        }
+        return await self._record_replenishment_decision(
+            connection,
+            {
+                **common,
+                "decision": "purchase_order_created",
+                "purchase_order": order,
+            },
+        )
 
     async def order_purchase_order(self, purchase_order_id: str) -> dict[str, Any]:
         try:

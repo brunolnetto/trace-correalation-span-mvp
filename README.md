@@ -45,20 +45,23 @@ Supplier Simulation API
   |-- Simulated Lead-Time Clock
   +-- Idempotent receipts through Inventory API
 
-Order, Inventory, and Supplier JSON logs
-  |
-  | bounded asynchronous publisher
-  v
-Event Collector
-  |-- Versioned Event Envelope
-  |-- Append-only JSONL + Quarantine
-  +-- Persistent Docker Volume
+PostgreSQL domain transactions
+  |-- Domain state mutation
+  +-- Immutable outbox event (same transaction)
          |
          v
-      dbt + DuckDB Analytics
+Outbox Dispatcher -- leased, at-least-once delivery --> Event Collector
+                                                        |-- Versioned Envelope
+                                                        |-- Append-only JSONL
+                                                        |-- Quarantine
+                                                        +-- Persistent Volume
+                                                               |
+                                                               v
+                                                            dbt + DuckDB
 
-Services export OTLP traces to Jaeger. Order, Inventory, and Supplier logs
-are forwarded asynchronously to the raw event collector.
+Non-transactional events (generator attempts and rejected reservations) use
+the bounded best-effort publisher. Diagnostic JSON logs remain on stdout.
+Services export OTLP traces to Jaeger.
 ```
 
 - **correlation_id** identifies the business operation across services.
@@ -352,21 +355,22 @@ and compensation spans are a separate observability iteration.
 
 ## Versioned raw event collection
 
-The Event Collector API is exposed on port 18003. Order and Inventory services
-forward their structured logs through a bounded background queue; request
-handlers only enqueue events and never wait on collector HTTP I/O. Supplier
-Simulation uses the same publisher when that service is included in the
-Compose stack.
+The Event Collector API is exposed on port 18003. In PostgreSQL mode,
+Order, Inventory, and Supplier business events are captured by migration
+`0006_transactional_outbox.sql` in the same transaction as their domain
+mutations. The dedicated `outbox-dispatcher` claims leased batches and delivers
+them to the Collector with stable event IDs. The existing bounded in-process
+publisher is retained only for non-transactional events (generator attempts
+and rejected reservation attempts) and explicit in-memory development mode.
 
 The collector accepts batches at `POST /v1/events` using schema version
-`1.0`. Each envelope preserves the original structured log in `source` and
-promotes its main fields:
+`1.0`. Each envelope preserves a source representation and promotes its main fields:
 
 - `event_id`: immutable event identity used for replay deduplication.
 - `occurred_at` and collector-assigned `ingested_at`: event and ingestion time.
 - `service`, `logger`, `level`, and `event_name`.
 - `correlation_id`, `trace_id`, and `span_id` as separate identifiers.
-- `attributes`: original structured log attributes.
+- `attributes`: original structured event attributes.
 
 Accepted records are appended to `/data/events.jsonl` and fsynced before the
 collector acknowledges the batch. The `event_id` index is rebuilt from that
@@ -391,14 +395,20 @@ the volume as well as the containers:
 docker compose down --volumes
 ```
 
-Delivery guarantees are deliberately split: once accepted, the collector's
-append is durable and replay-safe. Before acknowledgement, service-side
-delivery is best-effort: its bounded in-memory queue retries transient HTTP
-failures, but queue overflow or abrupt service termination can still lose
-pending events. The publisher exposes dropped-event and failed-batch counters
-in process memory; a durable producer outbox is a future hardening step.
-The collector is a single-writer MVP; do not mount the same JSONL files into
-multiple collector replicas.
+For PostgreSQL-backed business mutations, the outbox row is committed atomically
+with domain state and delivered at least once. The same event ID is replayed
+after lease expiry or an uncertain acknowledgement; Collector deduplication
+prevents duplicate analytical facts. Transient failures use capped exponential
+backoff, while permanent rejection or exhausted retries move an event to
+`blocked` for operator inspection. See
+[the transactional outbox runbook](docs/transactional-outbox.md) for its
+protocol, configuration, and operational endpoints.
+
+Events without a committed domain mutation (currently generator attempts and
+rejected reservations) still use the bounded process-local queue and remain
+best-effort. In-memory development mode also retains the queue. The collector
+is a single-writer MVP; do not mount the same JSONL files into multiple
+collector replicas.
 
 ## dbt analytics
 

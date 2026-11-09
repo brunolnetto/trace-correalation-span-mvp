@@ -58,6 +58,7 @@ def test_migrations_apply_to_empty_schema_repeat_and_reject_checksum_drift(
             "0003_persist_order_outcomes",
             "0004_persist_supplier_state",
             "0005_durable_order_saga",
+            "0006_transactional_outbox",
         ]
 
         tables = {
@@ -88,13 +89,14 @@ def test_migrations_apply_to_empty_schema_repeat_and_reject_checksum_drift(
             "order_saga_executions",
             "order_saga_steps",
             "order_payments",
+            "outbox_events",
         }.issubset(tables)
 
         assert apply_migrations(connection, MIGRATIONS_DIR) == []
         migration_count = connection.execute(
             "SELECT count(*) AS count FROM schema_migrations"
         ).fetchone()[0]
-        assert migration_count == 5
+        assert migration_count == 6
 
     altered_migrations = tmp_path / "migrations"
     shutil.copytree(MIGRATIONS_DIR, altered_migrations)

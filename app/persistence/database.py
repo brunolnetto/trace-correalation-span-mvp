@@ -93,12 +93,54 @@ class DatabaseManager:
         """Restore the connection binding that was active before this scope."""
         self._bound_connection.reset(token)
 
+    async def _set_transaction_context(
+        self, connection: AsyncConnection
+    ) -> None:
+        """Expose request correlation and trace IDs to transactional triggers."""
+        from opentelemetry import trace
+
+        from app.observability import correlation_id_context
+
+        span_context = trace.get_current_span().get_span_context()
+        trace_id = (
+            format(span_context.trace_id, "032x")
+            if span_context.is_valid
+            else ""
+        )
+        span_id = (
+            format(span_context.span_id, "016x")
+            if span_context.is_valid
+            else ""
+        )
+        await connection.execute(
+            """
+            SELECT
+                set_config('app.correlation_id', %s, true),
+                set_config('app.trace_id', %s, true),
+                set_config('app.span_id', %s, true)
+            """,
+            (correlation_id_context.get() or "", trace_id, span_id),
+        )
+
     @asynccontextmanager
     async def _bound_transaction(
         self, connection: AsyncConnection
     ) -> AsyncIterator[AsyncConnection]:
         """Run one repository operation on the currently bound session."""
         async with connection.transaction():
+            await self._set_transaction_context(connection)
+            yield connection
+
+    @asynccontextmanager
+    async def _pooled_transaction(
+        self,
+        timeout: float | None,
+    ) -> AsyncIterator[AsyncConnection]:
+        pool = self._pool
+        if pool is None:
+            raise RuntimeError("PostgreSQL connection pool is not open")
+        async with pool.connection(timeout=timeout) as connection:
+            await self._set_transaction_context(connection)
             yield connection
 
     def connection(
@@ -121,7 +163,7 @@ class DatabaseManager:
         effective_timeout = timeout
         if effective_timeout is None and self._settings is not None:
             effective_timeout = self._settings.connect_timeout_seconds
-        return self._pool.connection(timeout=effective_timeout)
+        return self._pooled_transaction(effective_timeout)
 
     async def healthy(self) -> bool:
         if self._settings is None or self._settings.backend == "memory":

@@ -11,6 +11,38 @@ from uuid import uuid4
 
 import httpx
 
+# Only explicitly named business events enter the analytical Event Collector.
+# Diagnostic logs remain on stdout and are queried through the telemetry path.
+BUSINESS_EVENT_NAMES = frozenset(
+    {
+        "order_generator.attempt",
+        "order.process.started",
+        "order.process.completed",
+        "order.process.failed",
+        "product.created",
+        "product.updated",
+        "inventory.stock.received",
+        "inventory.stock.adjusted",
+        "inventory.reservation.rejected",
+        "inventory.reservation.created",
+        "inventory.reservation.committed",
+        "inventory.reservation.released",
+        "supplier.product.onboarded",
+        "supplier.reorder_policy.created",
+        "supplier.reorder_policy.updated",
+        "supplier.replenishment.evaluated",
+        "supplier.purchase_order.ordered",
+        "supplier.purchase_order.receiving",
+        "supplier.purchase_order.received",
+        "supplier.purchase_order.created",
+        "supplier.purchase_order.cancelled",
+    }
+)
+DURABLE_OUTBOX_EVENT_NAMES = BUSINESS_EVENT_NAMES - {
+    "order_generator.attempt",
+    "inventory.reservation.rejected",
+}
+
 
 def build_event_envelope(
     source: dict[str, Any], *, event_id: str | None = None
@@ -33,12 +65,12 @@ def build_event_envelope(
 
 
 class AsyncCollectorHandler(logging.Handler):
-    """Bounded, non-blocking logging handler with batched HTTP delivery.
+    """Best-effort forwarding for explicitly allowlisted non-transactional events.
 
-    Events accepted by the collector are durable and replay-safe. This
-    in-process queue is best-effort before collector acknowledgement: queue
-    overflow or an application crash can lose events, and the dropped counter
-    makes local delivery pressure visible.
+    In PostgreSQL mode, domain events captured by database triggers are
+    suppressed here and delivered by the transactional outbox. The in-process
+    queue remains only for events without a durable domain transaction (such
+    as generator attempts and rejected reservations).
     """
 
     def __init__(
@@ -77,6 +109,17 @@ class AsyncCollectorHandler(logging.Handler):
             return
 
         try:
+            message = record.getMessage()
+            if message not in BUSINESS_EVENT_NAMES:
+                return
+            if (
+                os.getenv("PERSISTENCE_BACKEND", "memory").lower() == "postgres"
+                and message in DURABLE_OUTBOX_EVENT_NAMES
+            ):
+                # These events are created by PostgreSQL triggers in the same
+                # transaction as the committed domain mutation. Forwarding
+                # their logs here would create duplicate, best-effort facts.
+                return
             source = json.loads(self._formatter.format(record))
             event = build_event_envelope(source)
             self._queue.put_nowait(event)
