@@ -6,7 +6,7 @@ The Supplier Simulator owns supplier-facing state:
 
 - fixture supplier offerings and their inventory-SKU mapping;
 - the supplier-to-Inventory product onboarding reference;
-- reorder policies and their version history (current version is stored on the policy);
+- reorder policies with monotonically increasing versions (POs retain the version snapshot);
 - purchase orders, line snapshots, and lifecycle transition history;
 - the deterministic simulation clock used for lead-time calculations.
 
@@ -15,7 +15,7 @@ Supplier Simulator may create or read products through its public API and may
 request a stock receipt through `POST /inventory/{product_id}/receipts`. It
 must not connect to, query, or mutate Inventory tables directly.
 
-Both APIs use the shared PostgreSQL database and independent connection pools.
+Order, Inventory, and Supplier APIs use the shared PostgreSQL database through independent connection pools.
 The Supplier Simulator uses the same `PERSISTENCE_BACKEND`,
 `DATABASE_URL`, and pool configuration as the Order and Inventory APIs.
 Migrations are applied by the existing migration command before the services
