@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from importlib import import_module
 
 import httpx
@@ -325,3 +326,133 @@ async def test_proxy_preserves_multiple_set_cookie_headers():
         "session=one; HttpOnly",
         "preference=dark; Path=/",
     ]
+
+
+
+@pytest.mark.asyncio
+async def test_proxy_enforces_max_in_flight_under_concurrent_http_requests():
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def upstream_handler(request: httpx.Request) -> httpx.Response:
+        started.set()
+        await release.wait()
+        return httpx.Response(200, json={"ok": True})
+
+    gateway_app.state.policy_store = PolicyStore(
+        make_policy(make_route(max_in_flight=1))
+    )
+    await gateway_app.state.http_client.aclose()
+    gateway_app.state.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(upstream_handler)
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=gateway_app),
+        base_url="http://gateway.test",
+    ) as client:
+        first_request = asyncio.create_task(client.get("/orders/first"))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        second_response = await client.get("/orders/second")
+        release.set()
+        first_response = await first_request
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 503
+    assert second_response.headers["x-simulation-decision"] == "overloaded"
+
+
+@pytest.mark.asyncio
+async def test_proxy_enforces_token_bucket_under_concurrent_http_requests():
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def upstream_handler(request: httpx.Request) -> httpx.Response:
+        started.set()
+        await release.wait()
+        return httpx.Response(200, json={"ok": True})
+
+    gateway_app.state.policy_store = PolicyStore(
+        make_policy(
+            make_route(
+                requests_per_second=0.001,
+                rate_limit_burst=1,
+            )
+        )
+    )
+    await gateway_app.state.http_client.aclose()
+    gateway_app.state.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(upstream_handler)
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=gateway_app),
+        base_url="http://gateway.test",
+    ) as client:
+        first_request = asyncio.create_task(client.get("/orders/first"))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        second_response = await client.get("/orders/second")
+        release.set()
+        first_response = await first_request
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 429
+    assert second_response.headers["x-simulation-decision"] == "rate_limited"
+
+
+@pytest.mark.asyncio
+async def test_baseline_degraded_policy_and_recovery_are_observable():
+    upstream_calls = 0
+
+    async def upstream_handler(request: httpx.Request) -> httpx.Response:
+        nonlocal upstream_calls
+        upstream_calls += 1
+        return httpx.Response(200, json={"ok": True})
+
+    await gateway_app.state.http_client.aclose()
+    gateway_app.state.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(upstream_handler)
+    )
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=gateway_app),
+        base_url="http://gateway.test",
+    ) as client:
+        headers = {"X-Simulation-Request-ID": "baseline-degraded-recovery"}
+        baseline = await client.get("/orders/123", headers=headers)
+
+        degraded_policy = await client.put(
+            "/_simulator/policy",
+            json={
+                "expected_revision": 1,
+                "seed": 42,
+                "routes": [
+                    make_route(
+                        failure_probability=1.0,
+                        failure_status_code=503,
+                    ).model_dump(mode="json")
+                ],
+            },
+        )
+        degraded = await client.get("/orders/123", headers=headers)
+
+        recovery_policy = await client.put(
+            "/_simulator/policy",
+            json={
+                "expected_revision": 2,
+                "seed": 42,
+                "routes": [make_route().model_dump(mode="json")],
+            },
+        )
+        recovered = await client.get("/orders/123", headers=headers)
+
+    assert baseline.status_code == 200
+    assert degraded_policy.status_code == 200
+    assert degraded_policy.json()["revision"] == 2
+    assert degraded.status_code == 503
+    assert degraded.headers["x-simulation-decision"] == "injected_http_failure"
+    assert recovery_policy.status_code == 200
+    assert recovery_policy.json()["revision"] == 3
+    assert recovered.status_code == 200
+    assert recovered.headers["x-gateway-policy-revision"] == "3"
+    assert upstream_calls == 2
