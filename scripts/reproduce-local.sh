@@ -444,13 +444,13 @@ echo "    Jaeger contains declined-order trace $DECLINE_TRACE_ID with cross-serv
 
 # Search Loki by the same business correlation ID used to find the trace.
 # Correlation ID is structured metadata, not an indexed label.
-LOKI_QUERY="{service_name=\\"order-api\\"} | correlation_id=\\"$DECLINE_CORRELATION_ID\\""
+LOKI_QUERY="{service_name=\\\"order-api\\\"} | correlation_id=\\\"$DECLINE_CORRELATION_ID\\\""
 LOKI_FOUND=0
 deadline=$((SECONDS + WAIT_SECONDS))
 while (( SECONDS < deadline )); do
-  if curl --silent --show-error --fail --get \\
-    --data-urlencode "query=$LOKI_QUERY" \\
-    --data-urlencode "limit=1000" \\
+  if curl --silent --show-error --fail --get \
+    --data-urlencode "query=$LOKI_QUERY" \
+    --data-urlencode "limit=1000" \
     "$LOKI_URL/loki/api/v1/query" -o "$TMP_DIR/loki-query.json"; then
     if python3 - "$TMP_DIR/loki-query.json" <<'PY'
 import json
