@@ -779,10 +779,12 @@ async def run_scenario(
             report["correlation_ids"]["orders"],
             supplier_correlation_id,
         )
+        collector_read_headers = await service_authorization_headers("events:read")
         async with _make_client(
             config.event_collector_url,
             config.request_timeout_seconds,
             transport,
+            headers=collector_read_headers,
         ) as collector:
             barrier = await wait_for_collector_events(
                 collector,
