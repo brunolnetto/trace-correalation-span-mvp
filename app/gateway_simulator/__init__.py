@@ -1,0 +1,1 @@
+"""Local API Gateway behavior simulator."""

@@ -284,14 +284,54 @@ services:
       event-collector:
         condition: service_healthy
 
+  gateway-simulator:
+    build: .
+    command: ["uvicorn", "app.gateway_simulator.main:app", "--host", "0.0.0.0", "--port", "8004"]
+    environment:
+      SERVICE_NAME: gateway-simulator
+      ORDER_API_URL: http://order-api:8000
+      INVENTORY_API_URL: http://inventory-api:8001
+      SUPPLIER_API_URL: http://supplier-simulator:8002
+      GATEWAY_SIMULATION_SEED: "${GATEWAY_SIMULATION_SEED:-20261109}"
+      OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: http://otel-collector:4318/v1/traces
+      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: http://otel-collector:4318/v1/logs
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: http://otel-collector:4318/v1/metrics
+      OTEL_TRACES_SAMPLER_ARG: "1.0"
+      ENVIRONMENT: development
+    ports:
+      - "127.0.0.1:${GATEWAY_SIMULATOR_HOST_PORT:-18004}:8004"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8004/_simulator/healthz", timeout=2)
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    depends_on:
+      otel-collector:
+        condition: service_started
+      order-api:
+        condition: service_healthy
+      inventory-api:
+        condition: service_healthy
+      supplier-simulator:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
   simulation-runner:
     build: .
     profiles: ["standalone"]
     command: ["python", "-m", "app.standalone_runner"]
     environment:
-      ORDER_API_URL: http://order-api:8000
-      INVENTORY_API_URL: http://inventory-api:8001
-      SUPPLIER_API_URL: http://supplier-simulator:8002
+      ORDER_API_URL: http://gateway-simulator:8004
+      INVENTORY_API_URL: http://gateway-simulator:8004
+      SUPPLIER_API_URL: http://gateway-simulator:8004
       EVENT_COLLECTOR_URL: http://event-collector:8010
       SIMULATION_REPORT_PATH: /run-state/simulation-report.json
       SIMULATION_COLLECTOR_BARRIER_TIMEOUT_SECONDS: "30"
@@ -319,13 +359,15 @@ services:
         condition: service_healthy
       outbox-dispatcher:
         condition: service_healthy
+      gateway-simulator:
+        condition: service_healthy
 
   order-generator:
     build: .
     profiles: ["simulation"]
     command: ["python", "-m", "app.order_generator"]
     environment:
-      ORDER_API_URL: http://order-api:8000
+      ORDER_API_URL: http://gateway-simulator:8004
       EVENT_COLLECTOR_URL: http://event-collector:8010
       ORDER_GENERATOR_MODE: random
       ORDER_GENERATOR_COUNT: "10"
@@ -335,6 +377,8 @@ services:
       order-api:
         condition: service_healthy
       event-collector:
+        condition: service_healthy
+      gateway-simulator:
         condition: service_healthy
 
   analytics:

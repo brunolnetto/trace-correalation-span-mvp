@@ -23,6 +23,7 @@ ORDER_API_HOST_PORT="${ORDER_API_HOST_PORT:-18000}"
 INVENTORY_API_HOST_PORT="${INVENTORY_API_HOST_PORT:-18001}"
 SUPPLIER_HOST_PORT="${SUPPLIER_HOST_PORT:-18002}"
 EVENT_COLLECTOR_HOST_PORT="${EVENT_COLLECTOR_HOST_PORT:-18003}"
+GATEWAY_SIMULATOR_HOST_PORT="${GATEWAY_SIMULATOR_HOST_PORT:-18004}"
 JAEGER_UI_HOST_PORT="${JAEGER_UI_HOST_PORT:-16686}"
 GRAFANA_HOST_PORT="${GRAFANA_HOST_PORT:-13000}"
 LOKI_HOST_PORT="${LOKI_HOST_PORT:-13100}"
@@ -30,7 +31,7 @@ OTLP_GRPC_HOST_PORT="${OTLP_GRPC_HOST_PORT:-4317}"
 OTLP_HTTP_HOST_PORT="${OTLP_HTTP_HOST_PORT:-4318}"
 OTEL_HEALTH_HOST_PORT="${OTEL_HEALTH_HOST_PORT:-13133}"
 export ORDER_API_HOST_PORT INVENTORY_API_HOST_PORT SUPPLIER_HOST_PORT
-export EVENT_COLLECTOR_HOST_PORT JAEGER_UI_HOST_PORT GRAFANA_HOST_PORT LOKI_HOST_PORT
+export EVENT_COLLECTOR_HOST_PORT GATEWAY_SIMULATOR_HOST_PORT JAEGER_UI_HOST_PORT GRAFANA_HOST_PORT LOKI_HOST_PORT
 export OTLP_GRPC_HOST_PORT OTLP_HTTP_HOST_PORT OTEL_HEALTH_HOST_PORT
 ORDER_URL="${ORDER_URL:-http://127.0.0.1:${ORDER_API_HOST_PORT}}"
 INVENTORY_URL="${INVENTORY_URL:-http://127.0.0.1:${INVENTORY_API_HOST_PORT}}"
@@ -40,6 +41,7 @@ LOKI_URL="${LOKI_URL:-http://127.0.0.1:${LOKI_HOST_PORT}}"
 OTEL_HEALTH_URL="${OTEL_HEALTH_URL:-http://127.0.0.1:${OTEL_HEALTH_HOST_PORT}}"
 SUPPLIER_URL="${SUPPLIER_URL:-http://127.0.0.1:${SUPPLIER_HOST_PORT}}"
 EVENT_COLLECTOR_URL="${EVENT_COLLECTOR_URL:-http://127.0.0.1:${EVENT_COLLECTOR_HOST_PORT}}"
+GATEWAY_URL="${GATEWAY_URL:-http://127.0.0.1:${GATEWAY_SIMULATOR_HOST_PORT}}"
 export POSTGRES_HOST_PORT="${POSTGRES_HOST_PORT:-15432}"
 WAIT_SECONDS="${WAIT_SECONDS:-60}"
 CLEANUP=0
@@ -148,6 +150,7 @@ wait_for_url "$GRAFANA_URL/api/health" "Grafana"
 wait_for_url "$OTEL_HEALTH_URL/" "OpenTelemetry Collector"
 wait_for_url "$EVENT_COLLECTOR_URL/healthz" "event-collector"
 wait_for_url "$SUPPLIER_URL/healthz" "supplier-simulator"
+wait_for_url "$GATEWAY_URL/_simulator/healthz" "gateway-simulator"
 wait_for_internal_service "outbox-dispatcher" "http://127.0.0.1:8011/healthz"
 
 echo "==> 5/7: Exercise catalog, orders, and supplier replenishment"
@@ -175,7 +178,7 @@ curl --silent --show-error --fail \
   --dump-header "$TMP_DIR/read.headers" \
   --output "$TMP_DIR/read.json" \
   --header "X-Correlation-ID: $READ_CORRELATION_ID" \
-  "$ORDER_URL/orders/7"
+  "$GATEWAY_URL/orders/7"
 
 PROCESS_STATUS="$(curl --silent --show-error \
   --dump-header "$TMP_DIR/process.headers" \
@@ -184,7 +187,7 @@ PROCESS_STATUS="$(curl --silent --show-error \
   --header "Content-Type: application/json" \
   --header "X-Correlation-ID: $PROCESS_CORRELATION_ID" \
   --data '{"product_id":7,"quantity":2}' \
-  "$ORDER_URL/orders/123/process")"
+  "$GATEWAY_URL/orders/123/process")"
 [[ "$PROCESS_STATUS" == "201" ]] || {
   cat "$TMP_DIR/process.json" >&2
   die "Expected successful order workflow to return 201, got $PROCESS_STATUS"
@@ -197,7 +200,7 @@ DECLINE_STATUS="$(curl --silent --show-error \
   --header "Content-Type: application/json" \
   --header "X-Correlation-ID: $DECLINE_CORRELATION_ID" \
   --data '{"product_id":7,"quantity":11}' \
-  "$ORDER_URL/orders/124/process")"
+  "$GATEWAY_URL/orders/124/process")"
 [[ "$DECLINE_STATUS" == "402" ]] || {
   cat "$TMP_DIR/decline.json" >&2
   die "Expected payment decline with compensation to return 402, got $DECLINE_STATUS"
@@ -210,7 +213,7 @@ INSUFFICIENT_STATUS="$(curl --silent --show-error \
   --header "Content-Type: application/json" \
   --header "X-Correlation-ID: $INSUFFICIENT_CORRELATION_ID" \
   --data "{\"product_id\":$LOW_STOCK_PRODUCT_ID,\"quantity\":5}" \
-  "$ORDER_URL/orders/125/process")"
+  "$GATEWAY_URL/orders/125/process")"
 [[ "$INSUFFICIENT_STATUS" == "409" ]] || {
   cat "$TMP_DIR/insufficient.json" >&2
   die "Expected insufficient inventory to return 409, got $INSUFFICIENT_STATUS"
