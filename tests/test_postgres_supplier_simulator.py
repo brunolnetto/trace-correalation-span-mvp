@@ -317,6 +317,27 @@ async def test_concurrent_replenishment_evaluations_create_one_active_purchase_o
         assert purchase_order["quantity"] == 7
         assert purchase_order["status"] == "created"
 
+        # The partial unique index remains a final guard even if a future
+        # writer bypasses the policy-row locking protocol.
+        with pytest.raises(psycopg.errors.UniqueViolation):
+            async with manager_a.connection() as connection:
+                await connection.execute(
+                    """
+                    INSERT INTO supplier_purchase_orders (
+                        purchase_order_id, product_id, policy_version, status,
+                        reorder_point, target_stock,
+                        inventory_position_at_order, on_hand_at_order,
+                        reserved_at_order, on_order_at_order,
+                        lead_time_seconds, created_at, updated_at
+                    )
+                    VALUES (
+                        %s, %s, 1, 'created', 5, 12, 5, 5, 0, 0,
+                        60, now(), now()
+                    )
+                    """,
+                    (uuid4(), product_id),
+                )
+
         transitions = await store_b.list_purchase_order_transitions(
             purchase_order["purchase_order_id"]
         )
