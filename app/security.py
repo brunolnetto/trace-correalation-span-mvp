@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
+import math
 import os
+import sys
 import threading
 import time
 from collections import OrderedDict
@@ -90,9 +92,15 @@ class AuthSettings:
     def from_env(cls) -> AuthSettings:
         mode = os.getenv("AUTH_MODE", "oidc").strip().lower()
         if mode == "test":
-            if not os.getenv("PYTEST_CURRENT_TEST"):
+            if (
+                os.getenv("ENVIRONMENT", "development").lower() in {"production", "prod"}
+                or (
+                    not os.getenv("PYTEST_CURRENT_TEST")
+                    and "pytest" not in sys.modules
+                )
+            ):
                 raise RuntimeError(
-                    "AUTH_MODE=test is permitted only inside an active pytest run"
+                    "AUTH_MODE=test is permitted only inside a non-production pytest process"
                 )
             return cls(
                 mode="test",
@@ -247,13 +255,18 @@ def _principal_from_introspection(
         expires_at = float(payload["exp"])
     except (KeyError, TypeError, ValueError):
         raise _unauthorized("Access token has no valid expiry") from None
+    if not math.isfinite(expires_at):
+        raise _unauthorized("Access token has invalid expiry")
     if expires_at <= now - 5:
         raise _unauthorized("Access token has expired")
 
     not_before = payload.get("nbf")
     if not_before is not None:
         try:
-            if float(not_before) > now + 5:
+            parsed_not_before = float(not_before)
+            if not math.isfinite(parsed_not_before):
+                raise _unauthorized("Access token has invalid not-before claim")
+            if parsed_not_before > now + 5:
                 raise _unauthorized("Access token is not active yet")
         except (TypeError, ValueError):
             raise _unauthorized("Access token has invalid not-before claim") from None
@@ -261,7 +274,10 @@ def _principal_from_introspection(
     issued_at = payload.get("iat")
     if issued_at is not None:
         try:
-            if float(issued_at) > now + 5:
+            parsed_issued_at = float(issued_at)
+            if not math.isfinite(parsed_issued_at):
+                raise _unauthorized("Access token has invalid issued-at claim")
+            if parsed_issued_at > now + 5:
                 raise _unauthorized("Access token has an invalid issued-at claim")
         except (TypeError, ValueError):
             raise _unauthorized("Access token has invalid issued-at claim") from None
@@ -271,8 +287,8 @@ def _principal_from_introspection(
         raise _unauthorized("Access token has no authorization scopes")
 
     client_id = payload.get("client_id", payload.get("azp", ""))
-    if not isinstance(client_id, str):
-        client_id = ""
+    if not isinstance(client_id, str) or not client_id:
+        raise _unauthorized("Access token has no valid client identity")
 
     principal = Principal(
         subject=subject,
@@ -380,8 +396,15 @@ async def _request_service_token(
         expires_in = int(payload.get("expires_in", 0))
     except (TypeError, ValueError):
         expires_in = 0
-    if not isinstance(access_token, str) or not access_token or token_type.lower() != "bearer":
+    if (
+        not isinstance(access_token, str)
+        or not access_token
+        or not isinstance(token_type, str)
+        or token_type.lower() != "bearer"
+    ):
         raise RuntimeError("Identity provider returned an invalid service token")
+    if expires_in <= 0:
+        raise RuntimeError("Identity provider returned a service token without a valid expiry")
     return access_token, time.monotonic() + max(0, expires_in - 30)
 
 
@@ -448,7 +471,13 @@ def service_authorization_headers_sync(*required_scopes: str) -> dict[str, str]:
             expires_in = int(payload.get("expires_in", 0))
         except (TypeError, ValueError):
             expires_in = 0
-        if not isinstance(access_token, str) or not access_token or token_type.lower() != "bearer":
+        if (
+            not isinstance(access_token, str)
+            or not access_token
+            or not isinstance(token_type, str)
+            or token_type.lower() != "bearer"
+            or expires_in <= 0
+        ):
             raise RuntimeError("Identity provider returned an invalid service token")
         expires_at = now + max(0, expires_in - 30)
         if expires_at > now:
