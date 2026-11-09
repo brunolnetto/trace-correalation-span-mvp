@@ -647,6 +647,8 @@ The APIs use OIDC access tokens and OAuth 2.0 scopes. Protected routes return
 401 when no valid Bearer token is supplied and 403 when the authenticated
 identity lacks the required scope. The OpenAPI document publishes Authorization
 Code and Client Credentials flows and the scope required by each route.
+Internal callers request only the required scopes and downstream audience; they
+do not forward user tokens or use one all-powerful token for every API.
 
 The local Compose environment includes a development-only Keycloak realm.
 Generate ignored local credentials before starting the stack manually:
