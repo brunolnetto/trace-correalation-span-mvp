@@ -279,6 +279,7 @@ async def test_order_and_supplier_events_are_written_with_domain_transitions(
         assert names.count("supplier.replenishment.evaluated") == 1
         assert names.count("supplier.purchase_order.created") == 1
         assert names.count("supplier.purchase_order.ordered") == 1
+        assert names.count("supplier.purchase_order.receiving") == 1
         assert names.count("supplier.purchase_order.received") == 1
 
         for row in rows:
