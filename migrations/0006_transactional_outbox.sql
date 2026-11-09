@@ -292,7 +292,7 @@ CREATE TRIGGER supplier_onboarding_outbox_insert
 CREATE OR REPLACE FUNCTION outbox_supplier_policy_change()
 RETURNS TRIGGER
 LANGUAGE plpgsql
-AS $
+AS $$
 DECLARE
     v_event_name TEXT;
 BEGIN
