@@ -292,6 +292,46 @@ async def test_order_and_supplier_events_are_written_with_domain_transitions(
 
 
 @pytest.mark.asyncio
+async def test_pending_event_is_dispatched_after_fresh_database_pool_restart(
+    outbox_database_url: str,
+) -> None:
+    database = await open_database(outbox_database_url)
+    expected_id = await insert_outbox_event(database)
+    await database.close()
+
+    restarted_database = await open_database(outbox_database_url)
+    try:
+        repository = PostgresOutboxRepository(restarted_database)
+        received: list[str] = []
+
+        def collector(request: httpx.Request) -> httpx.Response:
+            event = json.loads(request.content)["events"][0]
+            received.append(event["event_id"])
+            return httpx.Response(
+                202,
+                json={"accepted": 1, "duplicates": 0, "quarantined": 0},
+            )
+
+        dispatcher = OutboxDispatcher(
+            repository,
+            collector_url="http://collector.test",
+            batch_size=10,
+            transport=httpx.MockTransport(collector),
+            worker_id="worker-after-restart",
+        )
+        result = await dispatcher.dispatch_once()
+        assert result["delivered"] == 1
+        assert received == [expected_id]
+
+        rows = await outbox_rows(restarted_database)
+        assert len(rows) == 1
+        assert rows[0]["status"] == "delivered"
+        assert rows[0]["attempts"] == 1
+    finally:
+        await restarted_database.close()
+
+
+@pytest.mark.asyncio
 async def test_multiple_dispatchers_claim_disjoint_batches_and_expired_leases_recover(
     outbox_database_url: str,
 ) -> None:
@@ -346,17 +386,24 @@ async def test_collector_ack_lost_after_persist_is_safely_redelivered(
     outbox_database_url: str,
 ) -> None:
     database = await open_database(outbox_database_url)
+    token = correlation_id_context.set(
+        "550e8400-e29b-41d4-a716-446655440903"
+    )
     try:
         repository = PostgresOutboxRepository(database)
         expected_id = await insert_outbox_event(database)
         received_ids: set[str] = set()
         request_ids: list[str] = []
+        request_correlations: list[str | None] = []
+        event_correlations: list[str | None] = []
 
         def collector(request: httpx.Request) -> httpx.Response:
             payload = json.loads(request.content)
             event = payload["events"][0]
             event_id = event["event_id"]
             request_ids.append(event_id)
+            request_correlations.append(request.headers.get("x-correlation-id"))
+            event_correlations.append(event.get("correlation_id"))
             duplicate = event_id in received_ids
             received_ids.add(event_id)
             return httpx.Response(
@@ -387,7 +434,12 @@ async def test_collector_ack_lost_after_persist_is_safely_redelivered(
         assert first["claimed"] == 1
         assert first["delivered"] == 0
         assert received_ids == {expected_id}
+        await database.close()
 
+        # Reopen a fresh pool as a new process would. The Collector has already
+        # persisted the event, while PostgreSQL still has only an expired lease.
+        database = await open_database(outbox_database_url)
+        repository = PostgresOutboxRepository(database)
         async with database.connection() as connection:
             await connection.execute(
                 """
@@ -397,10 +449,24 @@ async def test_collector_ack_lost_after_persist_is_safely_redelivered(
                 """,
                 (expected_id,),
             )
-        repository.mark_delivered = mark_delivered  # type: ignore[method-assign]
-        second = await dispatcher.dispatch_once()
+
+        restarted_dispatcher = OutboxDispatcher(
+            repository,
+            collector_url="http://collector.test",
+            batch_size=1,
+            base_backoff_seconds=0,
+            max_backoff_seconds=0,
+            transport=httpx.MockTransport(collector),
+            worker_id="worker-after-crash",
+        )
+        second = await restarted_dispatcher.dispatch_once()
         assert second["delivered"] == 1
         assert request_ids == [expected_id, expected_id]
+        assert request_correlations == [
+            "550e8400-e29b-41d4-a716-446655440903",
+            "550e8400-e29b-41d4-a716-446655440903",
+        ]
+        assert event_correlations == request_correlations
         assert len(received_ids) == 1
 
         rows = await outbox_rows(database)
@@ -408,6 +474,7 @@ async def test_collector_ack_lost_after_persist_is_safely_redelivered(
         assert rows[0]["status"] == "delivered"
         assert rows[0]["attempts"] == 2
     finally:
+        correlation_id_context.reset(token)
         await database.close()
 
 
