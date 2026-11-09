@@ -40,10 +40,11 @@ Migration `0005_durable_order_saga.sql` adds three tables:
   Saga and order.
 
 The same PostgreSQL pool used by the Order API is used for these writes. There
-is no second asyncpg pool. The durable executor holds a session-level advisory
-lock on one checked-out connection while repository operations use other pool
-connections. Therefore PostgreSQL mode requires
-`DATABASE_POOL_MAX_SIZE >= 2`; the Compose configuration uses 10.
+is no second asyncpg pool. The durable executor binds its session-level
+advisory-lock connection to the current async execution context. Repository and
+payment transactions reuse that connection for their short writes, so holding
+the lock does not consume a second pool slot. The PostgreSQL recovery tests
+exercise this with `DATABASE_POOL_MAX_SIZE=1`.
 
 An order ID is claimed under a transaction-scoped advisory lock. Its request
 fingerprint covers order ID, product ID, quantity, unit price, and total
