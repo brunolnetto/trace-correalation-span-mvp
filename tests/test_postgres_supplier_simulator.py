@@ -144,8 +144,8 @@ async def _stop_api_process(process: subprocess.Popen | None) -> None:
 
 def _start_drop_first_receipt_proxy(
     upstream_url: str,
-) -> tuple[ThreadingHTTPServer, threading.Thread, dict[str, bool]]:
-    state = {"dropped": False}
+) -> tuple[ThreadingHTTPServer, threading.Thread, dict[str, bool | str]]:
+    state: dict[str, bool | str] = {"dropped": False}
 
     class ProxyHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -211,7 +211,7 @@ def _start_drop_first_receipt_proxy(
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     proxy_url = f"http://127.0.0.1:{server.server_port}"
-    state["url"] = proxy_url  # type: ignore[typeddict-unknown-key]
+    state["url"] = proxy_url
     return server, thread, state
 
 
@@ -251,9 +251,24 @@ async def test_supplier_state_survives_process_restarts_and_receipt_response_los
             httpx.AsyncClient(base_url=supplier_url, timeout=10) as supplier_a,
             httpx.AsyncClient(base_url=second_supplier_url, timeout=10) as supplier_b,
         ):
+            # Simulate a crash after Inventory created the catalog product but
+            # before Supplier persisted its onboarding reference. Onboarding
+            # must recover the canonical product by SKU after a 409.
+            preexisting_product = await inventory.post(
+                "/products",
+                json={
+                    "sku": "COFFEE-BEANS-250G",
+                    "name": "Whole bean coffee 250g",
+                    "category": "grocery",
+                    "unit_price": "24.90",
+                },
+            )
+            assert preexisting_product.status_code == 201
+            preexisting_product_id = preexisting_product.json()["product_id"]
             onboarded = await supplier_a.post("/supplier-catalog/BEANS-250/onboard")
             assert onboarded.status_code == 200
             product_id = onboarded.json()["product"]["product_id"]
+            assert product_id == preexisting_product_id
 
             policy = await supplier_a.put(
                 "/reorder-policies",
@@ -406,6 +421,23 @@ async def test_supplier_state_survives_process_restarts_and_receipt_response_los
                     assert inventory_after_lost_response.status_code == 200
                     assert inventory_after_lost_response.json()["on_hand"] == 20
 
+                    # The Inventory transaction has committed its durable
+                    # idempotency response even though Supplier never received it.
+                    with psycopg.connect(isolated_postgres_schema) as connection:
+                        receipt_row = connection.execute(
+                            """
+                            SELECT response->>'receipt_id'
+                            FROM idempotency_records
+                            WHERE scope = %s AND idempotency_key = %s
+                            """,
+                            (
+                                f"receipt:{product_id}",
+                                f"supplier-po:{second_po_id}",
+                            ),
+                        ).fetchone()
+                    assert receipt_row is not None and receipt_row[0]
+                    committed_receipt_id = receipt_row[0]
+
                     # Kill the process after the remote commit, restart against
                     # Inventory directly, and retry the stable PO idempotency key.
                     await _stop_api_process(supplier_process)
@@ -430,8 +462,7 @@ async def test_supplier_state_survives_process_restarts_and_receipt_response_los
                         assert retried_receipt.json()["status"] == "received"
                         assert (
                             retried_receipt.json()["receipt_id"]
-                            == recovered_state.json().get("receipt_id")
-                            or retried_receipt.json()["receipt_id"]
+                            == committed_receipt_id
                         )
 
                         transitions = await recovered_supplier.get(
