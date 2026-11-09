@@ -15,6 +15,8 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
 
+from app.security import service_authorization_headers
+
 from app.event_publisher import build_event_envelope
 
 Mode = Literal["random", "coverage"]
@@ -198,13 +200,15 @@ async def execute_plan(
         started_at = time.perf_counter()
         attempted_at = datetime.now(UTC).isoformat()
         try:
+            headers = await service_authorization_headers("orders:process")
+            headers["X-Correlation-ID"] = command.correlation_id
             response = await client.post(
                 f"/orders/{command.order_id}/process",
                 json={
                     "product_id": command.product_id,
                     "quantity": command.quantity,
                 },
-                headers={"X-Correlation-ID": command.correlation_id},
+                headers=headers,
             )
             elapsed_ms = (time.perf_counter() - started_at) * 1000
             payload = _parse_response(response)
@@ -378,11 +382,16 @@ async def publish_generator_events(
 ) -> dict[str, int]:
     accepted = 0
     duplicates = 0
+    auth_headers = await service_authorization_headers("events:ingest")
     for start in range(0, len(events), 500):
         batch = events[start : start + 500]
         for attempt in range(3):
             try:
-                response = await client.post("/v1/events", json={"events": batch})
+                response = await client.post(
+                    "/v1/events",
+                    json={"events": batch},
+                    headers=auth_headers,
+                )
                 response.raise_for_status()
                 result = response.json()
                 if result.get("quarantined", 0) or result.get("conflicts", 0):
