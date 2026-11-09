@@ -65,7 +65,9 @@ class DatabaseManager:
             )
             self._pool = pool
             if not await self.healthy():
-                raise ConnectionError("PostgreSQL health check failed after pool startup")
+                raise ConnectionError(
+                    "PostgreSQL health check failed after pool startup"
+                )
         except Exception:
             self._pool = None
             await pool.close()
