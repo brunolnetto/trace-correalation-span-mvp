@@ -9,6 +9,8 @@ from uuid import uuid4
 
 import httpx
 
+from app.security import service_authorization_headers
+
 from app.persistence.database import DatabaseManager
 
 logger = logging.getLogger(__name__)
@@ -311,12 +313,12 @@ class OutboxDispatcher:
         outbox_id = int(claim["outbox_id"])
         event = claim["event_payload"]
         try:
+            headers = await service_authorization_headers("events:ingest")
+            headers["X-Correlation-ID"] = claim.get("correlation_id") or ""
             response = await client.post(
                 "/v1/events",
                 json={"events": [event]},
-                headers={
-                    "X-Correlation-ID": claim.get("correlation_id") or ""
-                },
+                headers=headers,
             )
             response.raise_for_status()
             try:
