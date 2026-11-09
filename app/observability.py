@@ -9,14 +9,17 @@ from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI
-from opentelemetry import trace
+from opentelemetry import metrics, trace
 from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.propagate import set_global_textmap
 from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+from opentelemetry.sdk.metrics import MeterProvider
+from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import (
     TracerProvider,
@@ -231,10 +234,41 @@ def configure_tracing(service_name: str) -> TracerProvider:
     return provider
 
 
+
+def configure_metrics(service_name: str) -> MeterProvider | None:
+    """Export SDK metrics to the configured OTLP/HTTP Collector endpoint."""
+    endpoint = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
+    if not endpoint:
+        return None
+
+    resource = Resource.create(
+        {
+            "service.name": service_name,
+            "service.version": os.getenv("SERVICE_VERSION", "0.1.0"),
+            "deployment.environment.name": os.getenv(
+                "ENVIRONMENT", "development"
+            ),
+        }
+    )
+    reader = PeriodicExportingMetricReader(
+        OTLPMetricExporter(endpoint=endpoint, timeout=5),
+        export_interval_millis=int(
+            os.getenv("OTEL_METRIC_EXPORT_INTERVAL_MILLIS", "5000")
+        ),
+        export_timeout_millis=5000,
+    )
+    provider = MeterProvider(resource=resource, metric_readers=[reader])
+    metrics.set_meter_provider(provider)
+    atexit.register(provider.shutdown)
+    return provider
+
+
+
 def configure_observability(app: FastAPI, service_name: str) -> None:
     """Configure JSON logs, W3C tracing, and automatic FastAPI/HTTPX spans."""
     configure_logging(service_name)
     configure_tracing(service_name)
+    configure_metrics(service_name)
 
     # Register correlation middleware before instrumentation so the
     # OpenTelemetry server span is active while it executes.
