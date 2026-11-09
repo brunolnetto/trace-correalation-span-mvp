@@ -5,11 +5,10 @@ from importlib import import_module
 
 import httpx
 import pytest
-
-from app import observability
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
+from app import observability
 from app.gateway_simulator.metrics import GatewayMetrics, metric_attributes
 from app.gateway_simulator.policy import (
     GatewayPolicy,
