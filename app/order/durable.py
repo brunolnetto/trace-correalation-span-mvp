@@ -548,7 +548,7 @@ class PostgresPaymentGateway:
         self,
         database: DatabaseManager,
         *,
-        decline_above: Decimal = Decimal("1000"),
+        decline_above: Decimal = Decimal(1000),
     ) -> None:
         self.database = database
         self.decline_above = Decimal(str(decline_above))
