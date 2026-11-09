@@ -329,7 +329,16 @@ async def test_order_api_persists_success_and_catalog_failure_without_contract_c
             assert payment_declined is not None
             assert payment_declined["status"] == "payment_declined"
             assert payment_declined["reservation_id"] == reservation_ids[125]
-            assert payment_declined["payment_id"] is None
+            assert payment_declined["payment_id"] is not None
+
+            async with order_module.database_manager.connection() as connection:
+                cursor = await connection.execute(
+                    "SELECT status FROM order_payments WHERE payment_id = %s",
+                    (payment_declined["payment_id"],),
+                )
+                declined_payment = await cursor.fetchone()
+            assert declined_payment is not None
+            assert declined_payment["status"] == "declined"
 
             compensation_incomplete = await repository.get(126)
             assert compensation_incomplete is not None

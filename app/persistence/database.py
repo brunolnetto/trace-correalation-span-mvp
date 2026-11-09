@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
-from contextlib import AbstractAsyncContextManager
+from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextvars import ContextVar, Token
 from typing import Any
 
 from psycopg import AsyncConnection
@@ -24,6 +26,10 @@ class DatabaseManager:
         self._pool_name = pool_name
         self._settings: DatabaseSettings | None = None
         self._pool: AsyncConnectionPool[AsyncConnection] | None = None
+        self._bound_connection: ContextVar[AsyncConnection | None] = ContextVar(
+            f"{pool_name}_bound_connection",
+            default=None,
+        )
 
     @property
     def pool(self) -> AsyncConnectionPool[AsyncConnection] | None:
@@ -59,7 +65,9 @@ class DatabaseManager:
             )
             self._pool = pool
             if not await self.healthy():
-                raise ConnectionError("PostgreSQL health check failed after pool startup")
+                raise ConnectionError(
+                    "PostgreSQL health check failed after pool startup"
+                )
         except Exception:
             self._pool = None
             await pool.close()
@@ -73,15 +81,41 @@ class DatabaseManager:
         finally:
             self._settings = None
 
+    def bind_connection(
+        self, connection: AsyncConnection
+    ) -> Token[AsyncConnection | None]:
+        """Bind a checked-out session to the current async execution context."""
+        return self._bound_connection.set(connection)
+
+    def reset_connection(
+        self, token: Token[AsyncConnection | None]
+    ) -> None:
+        """Restore the connection binding that was active before this scope."""
+        self._bound_connection.reset(token)
+
+    @asynccontextmanager
+    async def _bound_transaction(
+        self, connection: AsyncConnection
+    ) -> AsyncIterator[AsyncConnection]:
+        """Run one repository operation on the currently bound session."""
+        async with connection.transaction():
+            yield connection
+
     def connection(
         self, *, timeout: float | None = None
     ) -> AbstractAsyncContextManager[AsyncConnection]:
-        """Check out a connection with a transaction-scoped pool context.
+        """Use the Saga's lock-owning session or check out a pooled connection.
 
-        Psycopg commits when the context exits normally and rolls back when an
-        exception escapes it. Inventory mutations keep all projection,
-        reservation, journal, and idempotency writes inside this boundary.
+        Normal callers receive a transaction-scoped pool connection. A durable
+        Saga binds its session-level advisory-lock connection to the current
+        async context; its checkpoint and payment transactions then reuse that
+        session instead of consuming a second pool slot. Psycopg commits when a
+        transaction context exits normally and rolls it back on an exception.
         """
+        bound = self._bound_connection.get()
+        if bound is not None:
+            return self._bound_transaction(bound)
+
         if self._pool is None:
             raise RuntimeError("PostgreSQL connection pool is not open")
         effective_timeout = timeout

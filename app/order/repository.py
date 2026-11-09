@@ -83,12 +83,17 @@ class PostgresOrderRepository:
                     unit_price = EXCLUDED.unit_price,
                     total_amount = EXCLUDED.total_amount,
                     saga_id = EXCLUDED.saga_id,
-                    reservation_id = EXCLUDED.reservation_id,
-                    payment_id = EXCLUDED.payment_id,
+                    reservation_id = COALESCE(
+                        EXCLUDED.reservation_id, orders.reservation_id
+                    ),
+                    payment_id = COALESCE(
+                        EXCLUDED.payment_id, orders.payment_id
+                    ),
                     status = EXCLUDED.status,
                     failure_category = EXCLUDED.failure_category,
                     correlation_id = EXCLUDED.correlation_id,
                     updated_at = now()
+                WHERE orders.saga_id IS NOT DISTINCT FROM EXCLUDED.saga_id
                 RETURNING *
                 """,
                 {
@@ -99,6 +104,10 @@ class PostgresOrderRepository:
                 },
             )
             row = await cursor.fetchone()
+            if row is None:
+                raise ValueError(
+                    f"Order {record['order_id']} is already owned by another Saga"
+                )
             return _order(row)
 
     async def get(self, order_id: int) -> dict[str, Any] | None:
