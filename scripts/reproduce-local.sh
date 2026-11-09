@@ -12,7 +12,7 @@ set -Eeuo pipefail
 
 # Isolate each reproduction run so named volumes cannot leak application state
 # across runs. --cleanup therefore removes only this run's disposable volumes.
-COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-trace-correalation-span-mvp}-repro-${BASHPID:-$}"
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-trace-correalation-span-mvp}-repro-${BASHPID}"
 export COMPOSE_PROJECT_NAME
 
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
