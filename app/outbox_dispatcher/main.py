@@ -12,7 +12,7 @@ from app.observability import configure_observability
 from app.persistence.config import DatabaseSettings
 from app.persistence.database import DatabaseManager
 from app.persistence.outbox import OutboxDispatcher, PostgresOutboxRepository
-from app.security import authenticate_request
+from app.security import authenticate_request, swagger_oauth_config
 
 logger = logging.getLogger(__name__)
 database = DatabaseManager(pool_name="outbox-dispatcher")
@@ -97,6 +97,7 @@ app = FastAPI(
         "At-least-once PostgreSQL outbox delivery to the append-only Event Collector."
     ),
     version="0.1.0",
+    swagger_ui_init_oauth=swagger_oauth_config(),
     lifespan=lifespan,
 )
 configure_observability(app, os.getenv("SERVICE_NAME", "outbox-dispatcher"))
