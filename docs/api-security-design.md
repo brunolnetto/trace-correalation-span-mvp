@@ -77,7 +77,19 @@ The initial machine identities are:
 | `order-generator` | `orders:process` |
 | `standalone-runner` | The minimum order, inventory, supplier, and event scopes required by its configured workflow |
 
-The caller obtains a token for its own identity, requests the minimum downstream scopes, caches it only until shortly before expiry, and sends it as a Bearer token. Each downstream API independently validates that token and its scopes. The identity provider, not an inbound `X-Service-Name` header, establishes the caller identity.
+The caller obtains a token for its own identity, requests only the scopes required by the downstream operation, caches it only until shortly before expiry, and sends it as a Bearer token. Each downstream API independently validates the token and its scopes. Its audience must identify the receiving API; the local Keycloak configuration does not attach every API audience to every service token. The identity provider, not an inbound `X-Service-Name` header, establishes the caller identity.
+
+The local Keycloak realm models each permission as an optional OIDC client scope with `include.in.token.scope=true`. Each service client is linked only to its allowed scope names. The caller requests the exact subset for an operation via the standard OAuth `scope` parameter. Keycloak adds only those requested, client-permitted scopes to the access token and introspection response. Audience mappers are similarly limited to the receiving APIs each caller needs:
+
+| Client | Downstream audiences |
+|---|---|
+| `order-api` | `inventory-api`, `event-collector` |
+| `inventory-api` | `event-collector` |
+| `supplier-simulator` | `inventory-api`, `event-collector` |
+| `outbox-dispatcher` | `event-collector` |
+| `order-generator` | `order-api`, `event-collector` |
+| `standalone-runner` | `inventory-api`, `order-api`, `supplier-simulator`, `event-collector` |
+| `local-developer` | All local API audiences (development-only) |
 
 The Event Collector is a separate trust boundary: ingestion is for machine identities; querying stored events and quarantine data requires an explicit read permission. The outbox dispatcher does not receive broader Event Collector read permissions.
 
