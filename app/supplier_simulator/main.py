@@ -107,10 +107,14 @@ async def onboard_supplier_product(supplier_sku: str):
             )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from None
-    except (httpx.HTTPError, RuntimeError) as exc:
-        if isinstance(exc, httpx.HTTPError):
-            raise map_inventory_error(exc) from None
-        raise HTTPException(status_code=502, detail=str(exc)) from None
+    except RuntimeError:
+        logger.exception("supplier.inventory_authentication.failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Inventory service authentication is temporarily unavailable.",
+        ) from None
+    except httpx.HTTPError as exc:
+        raise map_inventory_error(exc) from None
 
     logger.info(
         "supplier.product.onboarded",
@@ -144,6 +148,12 @@ async def upsert_reorder_policy(policy: ReorderPolicy):
         raise map_inventory_error(exc) from None
     except httpx.HTTPError as exc:
         raise map_inventory_error(exc) from None
+    except RuntimeError:
+        logger.exception("supplier.inventory_authentication.failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Inventory service authentication is temporarily unavailable.",
+        ) from None
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from None
 
@@ -170,6 +180,12 @@ async def evaluate_replenishment(
             )
     except httpx.HTTPError as exc:
         raise map_inventory_error(exc) from None
+    except RuntimeError:
+        logger.exception("supplier.inventory_authentication.failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Inventory service authentication is temporarily unavailable.",
+        ) from None
 
     for decision in decisions:
         logger.info(
@@ -272,6 +288,12 @@ async def receive_purchase_order(purchase_order_id: str):
         raise HTTPException(status_code=409, detail=str(exc)) from None
     except httpx.HTTPError as exc:
         raise map_inventory_error(exc) from None
+    except RuntimeError:
+        logger.exception("supplier.inventory_authentication.failed")
+        raise HTTPException(
+            status_code=503,
+            detail="Inventory service authentication is temporarily unavailable.",
+        ) from None
 
     logger.info(
         "supplier.purchase_order.received",
