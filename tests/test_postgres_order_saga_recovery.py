@@ -368,13 +368,16 @@ async def test_execution_created_before_first_step_is_run_after_restart(
             external_effects=effects,
             lose_response=False,
         )
-        result = await DurableOrderExecutor(repository, gateway).execute(
-            saga,
-            tracker=None,
-            record=await repository.get_by_order(order_id),
+        executor = DurableOrderExecutor(repository, gateway)
+        recovery = await executor.recover_pending(
+            lambda _adapter: (saga, None)
         )
 
-        assert result["order_status"] == "processed"
+        assert recovery == {"found": 1, "recovered": 1, "failed": 0}
+        recovered = await repository.get(context["saga_id"])
+        assert recovered is not None
+        assert recovered["status"] == "completed"
+        assert recovered["context"]["order_status"] == "processed"
         assert saga.reserve_attempts == 1
         assert effects == {f"{context['saga_id']}:{product_id}"}
     finally:
