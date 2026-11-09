@@ -387,24 +387,15 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
         incomplete_compensations = compensation_tracker.incomplete_steps
         if isinstance(exc, CompensationIncomplete):
             incomplete_compensations = exc.steps
-        failure_category = (
-            exc.failure_category
-            if isinstance(exc, DurableOrderFailure)
-            else classify_order_failure(exc)
-        )
-        outcome_status = (
-            "compensation_incomplete"
-            if incomplete_compensations
-            else failure_category
-        )
+
         failure_context = dict(saga_context)
+        latest_execution = None
         if durable_order_executor is not None:
             try:
                 latest_execution = await durable_order_executor.get_by_order(
                     order_id
                 )
             except Exception:
-                latest_execution = None
                 logger.exception(
                     "order.saga.failure_context_load_failed",
                     extra={"order_id": order_id, "saga_id": saga_id},
@@ -416,6 +407,28 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
         # the latest compensation context. Preserve completed side-effect IDs
         # in the final order projection for either execution mode.
         failure_context.update(compensation_tracker.last_context)
+
+        # A compensation failure is a secondary failure. Keep the original
+        # business failure category from the durable execution ledger instead
+        # of classifying CompensationIncomplete as a generic processing error.
+        persisted_failure_category = (
+            latest_execution.get("failure_category")
+            if latest_execution is not None
+            else None
+        )
+        failure_category = (
+            persisted_failure_category
+            or (
+                exc.failure_category
+                if isinstance(exc, DurableOrderFailure)
+                else classify_order_failure(exc)
+            )
+        )
+        outcome_status = (
+            "compensation_incomplete"
+            if incomplete_compensations
+            else failure_category
+        )
 
         try:
             await persist_order_outcome(
