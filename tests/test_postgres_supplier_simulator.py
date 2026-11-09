@@ -562,21 +562,21 @@ async def test_supplier_state_survives_process_restarts_and_receipt_response_los
                             "received",
                         ]
 
+                        post_receipt_decision = await recovered_supplier.post(
+                            "/replenishments/evaluate"
+                        )
+                        assert post_receipt_decision.status_code == 200
+                        final_decision = post_receipt_decision.json()["decisions"][0]
+                        assert final_decision["decision"] == "no_reorder"
+                        assert final_decision["on_hand"] == 20
+                        assert final_decision["on_order"] == 0
+                        assert final_decision["inventory_position"] == 20
+
                     final_inventory = await inventory.get(
                         f"/inventory/{product_id}"
                     )
                     assert final_inventory.status_code == 200
                     assert final_inventory.json()["on_hand"] == 20
-
-                    post_receipt_decision = await recovered_supplier.post(
-                        "/replenishments/evaluate"
-                    )
-                    assert post_receipt_decision.status_code == 200
-                    final_decision = post_receipt_decision.json()["decisions"][0]
-                    assert final_decision["decision"] == "no_reorder"
-                    assert final_decision["on_hand"] == 20
-                    assert final_decision["on_order"] == 0
-                    assert final_decision["inventory_position"] == 20
     finally:
         await _stop_api_process(supplier_process)
         await _stop_api_process(second_supplier_process)
