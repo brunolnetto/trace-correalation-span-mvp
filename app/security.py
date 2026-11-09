@@ -62,7 +62,10 @@ oauth2_scheme = OAuth2(
         authorizationCode=OAuthFlowAuthorizationCode(
             authorizationUrl=_AUTHORIZATION_URL,
             tokenUrl=_PUBLIC_TOKEN_URL,
-            scopes=_SCOPES,
+            scopes={
+                **_SCOPES,
+                "openid": "Authenticate the user with OpenID Connect",
+            },
         ),
         clientCredentials=OAuthFlowClientCredentials(
             tokenUrl=_PUBLIC_TOKEN_URL,
@@ -72,6 +75,14 @@ oauth2_scheme = OAuth2(
     scheme_name="OIDC",
     auto_error=False,
 )
+
+
+def swagger_oauth_config() -> dict[str, Any]:
+    """Configure Swagger UI for the local PKCE browser client."""
+    return {
+        "clientId": os.getenv("OIDC_PUBLIC_CLIENT_ID", "local-web"),
+        "usePkceWithAuthorizationCodeGrant": True,
+    }
 
 
 @dataclass(frozen=True, slots=True)
