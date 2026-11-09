@@ -13,6 +13,15 @@ from opentelemetry import trace
 
 from app.observability import configure_observability, correlation_id_context
 from app.order import workflow
+from app.order.durable import (
+    CompensationIncomplete,
+    DurableOrderExecutor,
+    DurableOrderFailure,
+    OrderExecutionBusy,
+    OrderExecutionConflict,
+    PostgresOrderSagaRepository,
+    PostgresPaymentGateway,
+)
 from app.order.repository import PostgresOrderRepository
 from app.order.workflow import (
     PaymentDeclined,
@@ -26,10 +35,13 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("order-api")
 
 database_manager = DatabaseManager(pool_name="order-api")
+durable_order_executor: DurableOrderExecutor | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    global durable_order_executor
+
     settings = DatabaseSettings.from_env()
     await database_manager.open(settings)
     try:
@@ -37,10 +49,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             workflow.configure_order_repository(
                 PostgresOrderRepository(database_manager)
             )
+            payment_adapter = PostgresPaymentGateway(
+                database_manager,
+                decline_above=Decimal(str(workflow.PAYMENT_DECLINE_ABOVE)),
+            )
+            durable_order_executor = DurableOrderExecutor(
+                PostgresOrderSagaRepository(database_manager),
+                payment_adapter,
+            )
+            recovery = await durable_order_executor.recover_pending(
+                lambda adapter: create_order_processing_saga(
+                    payment_adapter=adapter
+                )
+            )
+            logger.info("order.saga.startup_recovery.completed", extra=recovery)
         else:
             workflow.configure_order_repository(None)
+            durable_order_executor = None
         yield
     finally:
+        durable_order_executor = None
         workflow.configure_order_repository(None)
         await database_manager.close()
 
