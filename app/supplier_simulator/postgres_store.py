@@ -404,6 +404,20 @@ class PostgresSupplierSimulation:
             if product_id is not None and current_product_id != product_id:
                 continue
 
+            async with self.database.connection() as connection:
+                cursor = await connection.execute(
+                    """
+                    SELECT inventory_revision
+                    FROM supplier_reorder_policies
+                    WHERE product_id = %s
+                    """,
+                    (current_product_id,),
+                )
+                revision_row = await cursor.fetchone()
+                if revision_row is None:
+                    continue
+                inventory_revision = revision_row["inventory_revision"]
+
             inventory_response = await client.get(
                 f"/inventory/{current_product_id}",
                 headers={"X-Correlation-ID": correlation_id},
@@ -428,6 +442,21 @@ class PostgresSupplierSimulation:
                 if policy_row is None:
                     continue
                 current_policy = _policy(policy_row)
+                if policy_row["inventory_revision"] != inventory_revision:
+                    # A receipt may have committed after the first Inventory
+                    # read. Re-read while holding the policy lock so a stale
+                    # pre-receipt balance cannot create a duplicate PO after
+                    # the prior PO transitions out of the active state.
+                    inventory_response = await client.get(
+                        f"/inventory/{current_product_id}",
+                        headers={"X-Correlation-ID": correlation_id},
+                    )
+                    inventory_response.raise_for_status()
+                    inventory = inventory_response.json()
+                    on_hand = int(inventory["on_hand"])
+                    reserved = int(inventory["reserved"])
+                    available = on_hand - reserved
+
                 cursor = await connection.execute(
                     """
                     SELECT
@@ -872,6 +901,19 @@ class PostgresSupplierSimulation:
                 WHERE purchase_order_id = %s
                 """,
                 (now, receipt_id, purchase_order_uuid),
+            )
+            await connection.execute(
+                """
+                UPDATE supplier_reorder_policies
+                SET inventory_revision = inventory_revision + 1,
+                    updated_at = %s
+                WHERE product_id = (
+                    SELECT product_id
+                    FROM supplier_purchase_orders
+                    WHERE purchase_order_id = %s
+                )
+                """,
+                (now, purchase_order_uuid),
             )
             await self._insert_transition(
                 connection,
