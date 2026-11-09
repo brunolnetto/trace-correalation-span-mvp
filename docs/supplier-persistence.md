@@ -48,10 +48,15 @@ Transition history is protected against UPDATE, DELETE, and TRUNCATE.
 
 ## Duplicate replenishment protection
 
-Each replenishment evaluation reads the authoritative Inventory API snapshot,
-then locks that product's reorder-policy row while checking active POs and
-creating a PO. This serializes evaluations for one product across independent
-Supplier Simulator processes.
+Each replenishment evaluation locks that product's reorder-policy row
+before reading the authoritative Inventory API snapshot, then checks active
+POs and creates a PO in the same transaction. Receipt completion takes the
+same policy lock before moving a PO out of `receiving`. This serializes
+evaluations and receipt finalization for one product across independent
+Supplier Simulator processes, preventing a stale pre-receipt balance from
+creating an unnecessary second PO. The Inventory read is bounded by the
+Supplier API's five-second HTTP timeout; this intentionally favors a
+consistent decision over holding no database lock during the remote read.
 
 PostgreSQL also enforces the invariant with a partial unique index on
 `supplier_purchase_orders(product_id)` for statuses `created`, `ordered`,
