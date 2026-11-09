@@ -3,9 +3,9 @@ from __future__ import annotations
 import time
 from collections import OrderedDict
 
-import pytest
 from fastapi import HTTPException
 from fastapi.security import SecurityScopes
+import pytest
 
 import app.security as security
 
