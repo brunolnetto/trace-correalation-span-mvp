@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 umask 077
-trap 'rm -f /tmp/keycloak-scope-*.json /tmp/keycloak-client-*.json' EXIT
 
-KCADM_CONFIG="/tmp/keycloak-admin-$.config"
+KCADM_CONFIG="/tmp/keycloak-admin-$BASHPID.config"
 KCADM=(/opt/keycloak/bin/kcadm.sh --config "$KCADM_CONFIG")
 REALM="trace-local"
 SERVER="http://keycloak:8080"
