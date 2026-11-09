@@ -9,9 +9,8 @@ from uuid import uuid4
 
 import httpx
 
-from app.security import service_authorization_headers
-
 from app.persistence.database import DatabaseManager
+from app.security import service_authorization_headers
 
 logger = logging.getLogger(__name__)
 
