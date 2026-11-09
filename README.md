@@ -292,11 +292,22 @@ curl -X POST http://localhost:18002/clock/advance \
 curl -X POST http://localhost:18002/purchase-orders/<po-id>/receive
 ```
 
-Receiving sends an idempotent receipt to Inventory API using
-`supplier-po:<purchase_order_id>`. Replaying a receive after a supplier
-simulator restart can therefore safely replay the same inventory receipt,
-provided the purchase order record is restored; supplier policies and PO
-records themselves remain process-local in this MVP.
+Supplier offerings, onboarding references, reorder policies, purchase orders,
+PO line snapshots, lifecycle transitions, and the simulated clock are persisted
+in PostgreSQL. The Inventory API remains the sole owner of product and stock
+state; Supplier never writes Inventory tables or balances directly.
+
+Receiving persists `ordered -> receiving` before calling Inventory API with
+the stable idempotency key `supplier-po:<purchase_order_id>`. After Inventory
+returns its receipt ID, Supplier persists `receiving -> received`. If the
+Supplier process crashes before or after Inventory commits, a restarted
+instance can retry the PO from `receiving` with the same key. Inventory
+replays the original receipt instead of crediting stock twice. Purchase-order
+transition history is available at
+`GET /purchase-orders/{purchase_order_id}/transitions`.
+
+See [the supplier persistence and recovery guide](docs/supplier-persistence.md)
+for state ownership, lifecycle, uniqueness, and crash-recovery semantics.
 
 Run the full supplier stack with:
 
@@ -617,9 +628,8 @@ unit tests and explicit development use. PostgreSQL row locks and balance constr
 inventory writes. The PostgreSQL integration suite now covers multi-process
 contention, idempotent retries, transaction rollback, and balance constraints;
 see [the inventory concurrency contract](docs/inventory-concurrency.md).
-Supplier
-policies and purchase-order lifecycle persistence remain in issue #23. The
-demo payment gateway remains a process-local simulation: persisting a payment
+Supplier policy and purchase-order state are persisted in PostgreSQL;
+the demo payment gateway remains a process-local simulation: persisting a payment
 reference on the order does not make payment state or external payment effects
 durable.
 
