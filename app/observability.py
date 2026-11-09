@@ -4,6 +4,7 @@ import atexit
 import json
 import logging
 import os
+from collections.abc import Sequence
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
@@ -20,6 +21,7 @@ from opentelemetry.sdk._logs import LoggerProvider, LoggingHandler
 from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+from opentelemetry.sdk.metrics.view import View
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import (
     TracerProvider,
@@ -234,7 +236,11 @@ def configure_tracing(service_name: str) -> TracerProvider:
     return provider
 
 
-def configure_metrics(service_name: str) -> MeterProvider | None:
+def configure_metrics(
+    service_name: str,
+    *,
+    views: Sequence[View] = (),
+) -> MeterProvider | None:
     """Export SDK metrics to the configured OTLP/HTTP Collector endpoint."""
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_METRICS_ENDPOINT")
     if not endpoint:
@@ -256,17 +262,26 @@ def configure_metrics(service_name: str) -> MeterProvider | None:
         ),
         export_timeout_millis=5000,
     )
-    provider = MeterProvider(resource=resource, metric_readers=[reader])
+    provider = MeterProvider(
+        resource=resource,
+        metric_readers=[reader],
+        views=views,
+    )
     metrics.set_meter_provider(provider)
     atexit.register(provider.shutdown)
     return provider
 
 
-def configure_observability(app: FastAPI, service_name: str) -> None:
+def configure_observability(
+    app: FastAPI,
+    service_name: str,
+    *,
+    metric_views: Sequence[View] = (),
+) -> None:
     """Configure JSON logs, W3C tracing, and automatic FastAPI/HTTPX spans."""
     configure_logging(service_name)
     configure_tracing(service_name)
-    configure_metrics(service_name)
+    configure_metrics(service_name, views=metric_views)
 
     # Register correlation middleware before instrumentation so the
     # OpenTelemetry server span is active while it executes.
