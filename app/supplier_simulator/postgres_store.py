@@ -9,7 +9,7 @@ import httpx
 from psycopg.types.json import Jsonb
 
 from app.persistence.database import DatabaseManager
-from app.supplier_simulator.store import ReorderPolicy, SUPPLIER_CATALOG
+from app.supplier_simulator.store import SUPPLIER_CATALOG, ReorderPolicy
 
 
 def _iso(value: Any) -> str | None:
