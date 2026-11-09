@@ -324,13 +324,23 @@ class OutboxDispatcher:
                 raise OutboxProtocolError(
                     "Collector returned a non-JSON acknowledgement"
                 ) from exc
-            if int(acknowledgement.get("quarantined", 0)) > 0:
+            if not isinstance(acknowledgement, dict):
+                raise OutboxProtocolError(
+                    "Collector acknowledgement must be a JSON object"
+                )
+            counts: dict[str, int] = {}
+            for field in ("accepted", "duplicates", "quarantined"):
+                value = acknowledgement.get(field, 0)
+                if type(value) is not int or value < 0:
+                    raise OutboxProtocolError(
+                        f"Collector acknowledgement has invalid {field} count"
+                    )
+                counts[field] = value
+            if counts["quarantined"] > 0:
                 raise OutboxProtocolError(
                     "Collector quarantined the outbox event"
                 )
-            accepted = int(acknowledgement.get("accepted", 0))
-            duplicates = int(acknowledgement.get("duplicates", 0))
-            if accepted + duplicates != 1:
+            if counts["accepted"] + counts["duplicates"] != 1:
                 raise OutboxProtocolError(
                     "Collector acknowledgement did not account for exactly one event"
                 )
