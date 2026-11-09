@@ -3,7 +3,12 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import socket
+import subprocess
+import sys
+import threading
 from decimal import Decimal
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 from uuid import uuid4
 
@@ -500,3 +505,301 @@ async def test_cancelled_purchase_order_history_is_durable_and_replenishment_can
                 )
     finally:
         await manager.close()
+
+
+
+def _start_inventory_http_server(state: dict):
+    class Handler(BaseHTTPRequestHandler):
+        def _send_json(self, status_code: int, payload: dict) -> None:
+            body = json.dumps(payload).encode("utf-8")
+            self.send_response(status_code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self) -> None:
+            path = self.path.split("?", 1)[0]
+            if path == f"/products/{state['product_id']}":
+                self._send_json(200, state["product"])
+                return
+            if path == f"/inventory/{state['product_id']}":
+                balance = state["balance"]
+                self._send_json(
+                    200,
+                    {
+                        "product_id": state["product_id"],
+                        **balance,
+                        "available_quantity": (
+                            balance["on_hand"] - balance["reserved"]
+                        ),
+                    },
+                )
+                return
+            self._send_json(404, {"detail": "not found"})
+
+        def do_POST(self) -> None:
+            path = self.path.split("?", 1)[0]
+            expected = f"/inventory/{state['product_id']}/receipts"
+            if path != expected:
+                self._send_json(404, {"detail": "not found"})
+                return
+
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length))
+            state["receipt_calls"] += 1
+            failure = state["fail_next_receipt"]
+            if failure == "before_commit":
+                state["fail_next_receipt"] = None
+                self._send_json(503, {"detail": "injected pre-commit outage"})
+                return
+
+            key = payload["idempotency_key"]
+            if key not in state["receipts"]:
+                state["balance"]["on_hand"] += payload["quantity"]
+                state["receipts"][key] = {
+                    "receipt_id": f"receipt-{len(state['receipts']) + 1}",
+                    "product_id": state["product_id"],
+                    "quantity": payload["quantity"],
+                    "reference": payload.get("reference"),
+                }
+
+            if failure == "after_commit":
+                state["fail_next_receipt"] = None
+                self._send_json(503, {"detail": "injected lost response"})
+                return
+            self._send_json(201, state["receipts"][key])
+
+        def log_message(self, _format: str, *_args) -> None:
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread, f"http://127.0.0.1:{server.server_port}"
+
+
+def _start_supplier_api_process(
+    database_url: str, inventory_api_url: str
+) -> tuple[subprocess.Popen, str]:
+    with socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        port = listener.getsockname()[1]
+
+    environment = os.environ.copy()
+    environment.update(
+        {
+            "ENVIRONMENT": "development",
+            "PERSISTENCE_BACKEND": "postgres",
+            "DATABASE_URL": database_url,
+            "DATABASE_POOL_MIN_SIZE": "1",
+            "DATABASE_POOL_MAX_SIZE": "4",
+            "INVENTORY_API_URL": inventory_api_url,
+            "SERVICE_NAME": "supplier-restart-integration-test",
+            "LOG_LEVEL": "WARNING",
+        }
+    )
+    for name in (
+        "EVENT_COLLECTOR_URL",
+        "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT",
+        "OTEL_EXPORTER_OTLP_ENDPOINT",
+    ):
+        environment.pop(name, None)
+
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "app.supplier_simulator.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--log-level",
+            "warning",
+        ],
+        cwd=os.path.dirname(os.path.dirname(__file__)),
+        env=environment,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return process, f"http://127.0.0.1:{port}"
+
+
+async def _wait_for_supplier_process(
+    process: subprocess.Popen,
+    base_url: str,
+    *,
+    timeout_seconds: float = 20,
+) -> None:
+    deadline = asyncio.get_running_loop().time() + timeout_seconds
+    last_error: Exception | None = None
+    async with httpx.AsyncClient(timeout=1) as client:
+        while asyncio.get_running_loop().time() < deadline:
+            if process.poll() is not None:
+                raise AssertionError(
+                    "Supplier Simulator exited during startup: "
+                    f"{process.returncode}"
+                )
+            try:
+                response = await client.get(f"{base_url}/healthz")
+                if response.status_code == 200:
+                    return
+                last_error = AssertionError(
+                    f"Supplier health returned HTTP {response.status_code}"
+                )
+            except httpx.HTTPError as exc:
+                last_error = exc
+            await asyncio.sleep(0.1)
+    raise AssertionError(
+        f"Supplier Simulator did not become ready: {last_error}"
+    )
+
+
+async def _stop_supplier_process(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        await asyncio.to_thread(process.wait, timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        await asyncio.to_thread(process.wait, timeout=5)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_point", ["before_commit", "after_commit"])
+async def test_supplier_api_process_restart_recovers_receipt_without_double_credit(
+    postgres_schema_url: str,
+    failure_point: str,
+):
+    product_sku = f"SKU-SUPPLIER-PROCESS-{failure_point.upper()}"
+    with psycopg.connect(postgres_schema_url, row_factory=dict_row) as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO products (sku, name, category, unit_price)
+            VALUES (%s, 'Supplier process product', 'integration', %s)
+            RETURNING product_id
+            """,
+            (product_sku, Decimal("10.00")),
+        )
+        product_id = cursor.fetchone()["product_id"]
+        connection.execute(
+            """
+            INSERT INTO inventory_balances (product_id, on_hand, reserved)
+            VALUES (%s, 0, 0)
+            """,
+            (product_id,),
+        )
+
+    inventory_state = {
+        "product_id": product_id,
+        "product": {
+            "product_id": product_id,
+            "sku": product_sku,
+            "name": "Supplier process product",
+            "category": "integration",
+            "unit_price": "10.00",
+            "is_active": True,
+        },
+        "balance": {"on_hand": 5, "reserved": 0},
+        "receipts": {},
+        "receipt_calls": 0,
+        "fail_next_receipt": None,
+    }
+    inventory_server, inventory_thread, inventory_url = (
+        _start_inventory_http_server(inventory_state)
+    )
+    process: subprocess.Popen | None = None
+    try:
+        process, supplier_url = _start_supplier_api_process(
+            postgres_schema_url, inventory_url
+        )
+        await _wait_for_supplier_process(process, supplier_url)
+        async with httpx.AsyncClient(base_url=supplier_url, timeout=10) as client:
+            policy_response = await client.put(
+                "/reorder-policies",
+                json={
+                    "product_id": product_id,
+                    "reorder_point": 5,
+                    "target_stock": 12,
+                    "lead_time_seconds": 60,
+                },
+            )
+            assert policy_response.status_code == 200
+
+            evaluation = await client.post(
+                "/replenishments/evaluate",
+                params={"product_id": product_id},
+            )
+            assert evaluation.status_code == 200
+            purchase_order_id = evaluation.json()["decisions"][0][
+                "purchase_order"
+            ]["purchase_order_id"]
+
+            ordered = await client.post(
+                f"/purchase-orders/{purchase_order_id}/order"
+            )
+            assert ordered.status_code == 200
+            advanced = await client.post(
+                "/clock/advance", json={"seconds": 60}
+            )
+            assert advanced.status_code == 200
+
+            inventory_state["fail_next_receipt"] = failure_point
+            failed_attempt = await client.post(
+                f"/purchase-orders/{purchase_order_id}/receive"
+            )
+            assert failed_attempt.status_code == 502
+            pending = await client.get(
+                f"/purchase-orders/{purchase_order_id}"
+            )
+            assert pending.status_code == 200
+            assert pending.json()["status"] == "receiving"
+            assert pending.json()["receipt_id"] is None
+            assert inventory_state["balance"]["on_hand"] == (
+                5 if failure_point == "before_commit" else 12
+            )
+
+        await _stop_supplier_process(process)
+        process = None
+
+        # A fresh OS process must recover the persisted clock, PO state,
+        # and receipt identity solely from PostgreSQL.
+        process, restarted_url = _start_supplier_api_process(
+            postgres_schema_url, inventory_url
+        )
+        await _wait_for_supplier_process(process, restarted_url)
+        async with httpx.AsyncClient(
+            base_url=restarted_url, timeout=10
+        ) as restarted_client:
+            clock_response = await restarted_client.get("/clock")
+            assert clock_response.status_code == 200
+            assert clock_response.json()["now"] == advanced.json()["now"]
+
+            retried = await restarted_client.post(
+                f"/purchase-orders/{purchase_order_id}/receive"
+            )
+            assert retried.status_code == 200
+            assert retried.json()["status"] == "received"
+            assert retried.json()["receipt_id"] == inventory_state["receipts"][
+                f"supplier-po:{purchase_order_id}"
+            ]["receipt_id"]
+
+            history_response = await restarted_client.get(
+                f"/purchase-orders/{purchase_order_id}/transitions"
+            )
+            assert history_response.status_code == 200
+            assert [
+                item["to_status"] for item in history_response.json()
+            ] == ["created", "ordered", "receiving", "received"]
+
+        assert inventory_state["balance"] == {"on_hand": 12, "reserved": 0}
+        assert inventory_state["receipt_calls"] == 2
+    finally:
+        if process is not None:
+            await _stop_supplier_process(process)
+        inventory_server.shutdown()
+        inventory_server.server_close()
+        inventory_thread.join(timeout=5)
