@@ -20,7 +20,14 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
-from opentelemetry.trace import SpanKind
+from opentelemetry.trace import (
+    NonRecordingSpan,
+    SpanContext,
+    SpanKind,
+    TraceFlags,
+    TraceState,
+    set_span_in_context,
+)
 
 from app import observability
 from app.gateway_simulator.metrics import (
@@ -594,6 +601,13 @@ async def test_gateway_and_downstream_share_w3c_trace_and_correlated_logs():
     )
 
     correlation_id = "550e8400-e29b-41d4-a716-446655440011"
+    caller_parent = SpanContext(
+        trace_id=int("4bf92f3577b34da6a3ce929d0e0e4736", 16),
+        span_id=int("00f067aa0ba902b7", 16),
+        is_remote=True,
+        trace_flags=TraceFlags.SAMPLED,
+        trace_state=TraceState([("vendor", "value")]),
+    )
     log_stream = io.StringIO()
     log_handler = logging.StreamHandler(log_stream)
     log_handler.setFormatter(observability.JsonFormatter("trace-context-test"))
@@ -608,7 +622,10 @@ async def test_gateway_and_downstream_share_w3c_trace_and_correlated_logs():
             transport=httpx.ASGITransport(app=gateway),
             base_url="http://gateway.test",
         ) as client:
-            with tracer.start_as_current_span("test.caller") as caller_span:
+            with tracer.start_as_current_span(
+                "test.caller",
+                context=set_span_in_context(NonRecordingSpan(caller_parent)),
+            ) as caller_span:
                 response = await client.get(
                     "/orders/probe",
                     headers={"X-Correlation-ID": correlation_id},
@@ -618,7 +635,7 @@ async def test_gateway_and_downstream_share_w3c_trace_and_correlated_logs():
         assert response.status_code == 200
         assert response.headers["x-correlation-id"] == correlation_id
         assert captured["correlation_id"] == correlation_id
-        assert captured["tracestate"] is None
+        assert captured["tracestate"] == "vendor=value"
         assert captured["traceparent"] is not None
 
         spans = exporter.get_finished_spans()
