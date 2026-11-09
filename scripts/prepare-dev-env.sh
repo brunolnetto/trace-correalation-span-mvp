@@ -8,7 +8,7 @@ chmod 600 "$ENV_FILE"
 
 ensure_secret() {
   local name="$1"
-  if ! grep -q "^${name}=" "$ENV_FILE"; then
+  if ! grep -q "^${name}=." "$ENV_FILE"; then
     local value
     value="$(python3 -c 'import secrets; print(secrets.token_urlsafe(36))')"
     printf '%s=%s\n' "$name" "$value" >> "$ENV_FILE"
