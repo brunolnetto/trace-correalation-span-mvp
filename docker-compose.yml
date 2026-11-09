@@ -125,7 +125,7 @@ services:
       retries: 12
       start_period: 5s
     depends_on:
-      jaeger:
+      otel-collector:
         condition: service_started
 
   outbox-dispatcher:
@@ -199,7 +199,7 @@ services:
       retries: 12
       start_period: 5s
     depends_on:
-      jaeger:
+      otel-collector:
         condition: service_started
       event-collector:
         condition: service_healthy
@@ -234,7 +234,7 @@ services:
       retries: 12
       start_period: 5s
     depends_on:
-      jaeger:
+      otel-collector:
         condition: service_started
       inventory-api:
         condition: service_healthy
@@ -277,7 +277,7 @@ services:
       retries: 12
       start_period: 5s
     depends_on:
-      jaeger:
+      otel-collector:
         condition: service_started
       inventory-api:
         condition: service_healthy
