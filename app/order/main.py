@@ -166,135 +166,188 @@ async def persist_order_outcome(record: dict) -> None:
 
 @app.post("/orders/{order_id}/process", status_code=201, tags=["orders"])
 async def process_order(order_id: int, request: ProcessOrderRequest):
-    """Run the order saga, persist its outcome, and compensate on failure."""
+    """Run or resume the durable Order Saga, compensating deterministic failures."""
     correlation_id = correlation_id_context.get() or ""
-    saga_id = str(uuid4())
+    existing = (
+        await durable_order_executor.get_by_order(order_id)
+        if durable_order_executor is not None
+        else None
+    )
 
-    try:
-        async with workflow.create_inventory_client() as client:
-            response = await client.get(
-                f"/products/{request.product_id}",
-                headers={"X-Correlation-ID": correlation_id},
-            )
-            response.raise_for_status()
-            product = response.json()
-    except httpx.HTTPStatusError as exc:
-        failure_category = (
-            "product_not_found"
-            if exc.response.status_code == 404
-            else "product_catalog_rejected"
-        )
-        await persist_order_outcome(
-            {
-                "order_id": order_id,
-                "requested_product_id": request.product_id,
-                "product_id": None,
-                "quantity": request.quantity,
-                "unit_price": None,
-                "total_amount": None,
-                "saga_id": saga_id,
-                "reservation_id": None,
-                "payment_id": None,
-                "status": failure_category,
-                "failure_category": failure_category,
-                "correlation_id": correlation_id,
-            }
-        )
-        logger.warning(
-            "order.process.preflight_rejected",
-            extra={
-                "order_id": order_id,
-                "product_id": request.product_id,
-                "quantity": request.quantity,
-                "failure_category": failure_category,
-            },
-        )
-        if exc.response.status_code == 404:
+    if existing is not None:
+        saga_context = dict(existing["context"])
+        if (
+            int(saga_context["product_id"]) != request.product_id
+            or int(saga_context["quantity"]) != request.quantity
+        ):
             raise HTTPException(
-                status_code=404, detail="Product not found."
+                status_code=409,
+                detail="Order ID is already bound to a different request.",
+            )
+        saga_id = existing["saga_id"]
+        unit_price = Decimal(str(saga_context["unit_price"]))
+        amount = Decimal(str(saga_context["amount"]))
+        execution_record = existing
+    else:
+        saga_id = str(uuid4())
+        try:
+            async with workflow.create_inventory_client() as client:
+                response = await client.get(
+                    f"/products/{request.product_id}",
+                    headers={"X-Correlation-ID": correlation_id},
+                )
+                response.raise_for_status()
+                product = response.json()
+        except httpx.HTTPStatusError as exc:
+            failure_category = (
+                "product_not_found"
+                if exc.response.status_code == 404
+                else "product_catalog_rejected"
+            )
+            await persist_order_outcome(
+                {
+                    "order_id": order_id,
+                    "requested_product_id": request.product_id,
+                    "product_id": None,
+                    "quantity": request.quantity,
+                    "unit_price": None,
+                    "total_amount": None,
+                    "saga_id": saga_id,
+                    "reservation_id": None,
+                    "payment_id": None,
+                    "status": failure_category,
+                    "failure_category": failure_category,
+                    "correlation_id": correlation_id,
+                }
+            )
+            logger.warning(
+                "order.process.preflight_rejected",
+                extra={
+                    "order_id": order_id,
+                    "product_id": request.product_id,
+                    "quantity": request.quantity,
+                    "failure_category": failure_category,
+                },
+            )
+            if exc.response.status_code == 404:
+                raise HTTPException(
+                    status_code=404, detail="Product not found."
+                ) from None
+            raise HTTPException(
+                status_code=502, detail="Product catalog rejected the lookup."
             ) from None
-        raise HTTPException(
-            status_code=502, detail="Product catalog rejected the lookup."
-        ) from None
-    except httpx.HTTPError:
-        failure_category = "product_catalog_unavailable"
-        await persist_order_outcome(
-            {
-                "order_id": order_id,
-                "requested_product_id": request.product_id,
-                "product_id": None,
-                "quantity": request.quantity,
-                "unit_price": None,
-                "total_amount": None,
-                "saga_id": saga_id,
-                "reservation_id": None,
-                "payment_id": None,
-                "status": failure_category,
-                "failure_category": failure_category,
-                "correlation_id": correlation_id,
-            }
-        )
-        logger.exception(
-            "order.process.preflight_rejected",
-            extra={
-                "order_id": order_id,
-                "product_id": request.product_id,
-                "quantity": request.quantity,
-                "failure_category": failure_category,
-            },
-        )
-        raise HTTPException(
-            status_code=503, detail="Product catalog is temporarily unavailable."
-        ) from None
+        except httpx.HTTPError:
+            failure_category = "product_catalog_unavailable"
+            await persist_order_outcome(
+                {
+                    "order_id": order_id,
+                    "requested_product_id": request.product_id,
+                    "product_id": None,
+                    "quantity": request.quantity,
+                    "unit_price": None,
+                    "total_amount": None,
+                    "saga_id": saga_id,
+                    "reservation_id": None,
+                    "payment_id": None,
+                    "status": failure_category,
+                    "failure_category": failure_category,
+                    "correlation_id": correlation_id,
+                }
+            )
+            logger.exception(
+                "order.process.preflight_rejected",
+                extra={
+                    "order_id": order_id,
+                    "product_id": request.product_id,
+                    "quantity": request.quantity,
+                    "failure_category": failure_category,
+                },
+            )
+            raise HTTPException(
+                status_code=503,
+                detail="Product catalog is temporarily unavailable.",
+            ) from None
 
-    unit_price = Decimal(str(product["unit_price"])).quantize(Decimal("0.01"))
-    amount = unit_price * request.quantity
-    if not product["is_active"]:
-        await persist_order_outcome(
-            {
-                "order_id": order_id,
-                "requested_product_id": request.product_id,
-                "product_id": request.product_id,
-                "quantity": request.quantity,
-                "unit_price": unit_price,
-                "total_amount": amount,
-                "saga_id": saga_id,
-                "reservation_id": None,
-                "payment_id": None,
-                "status": "product_inactive",
-                "failure_category": "product_inactive",
-                "correlation_id": correlation_id,
-            }
+        unit_price = Decimal(str(product["unit_price"])).quantize(
+            Decimal("0.01")
         )
-        logger.warning(
-            "order.process.preflight_rejected",
-            extra={
-                "order_id": order_id,
-                "product_id": request.product_id,
-                "quantity": request.quantity,
-                "failure_category": "product_inactive",
-            },
-        )
-        raise HTTPException(status_code=409, detail="Product is inactive.")
+        amount = unit_price * request.quantity
+        if not product["is_active"]:
+            await persist_order_outcome(
+                {
+                    "order_id": order_id,
+                    "requested_product_id": request.product_id,
+                    "product_id": request.product_id,
+                    "quantity": request.quantity,
+                    "unit_price": unit_price,
+                    "total_amount": amount,
+                    "saga_id": saga_id,
+                    "reservation_id": None,
+                    "payment_id": None,
+                    "status": "product_inactive",
+                    "failure_category": "product_inactive",
+                    "correlation_id": correlation_id,
+                }
+            )
+            logger.warning(
+                "order.process.preflight_rejected",
+                extra={
+                    "order_id": order_id,
+                    "product_id": request.product_id,
+                    "quantity": request.quantity,
+                    "failure_category": "product_inactive",
+                },
+            )
+            raise HTTPException(status_code=409, detail="Product is inactive.")
 
-    await persist_order_outcome(
-        {
+        saga_context = {
             "order_id": order_id,
-            "requested_product_id": request.product_id,
             "product_id": request.product_id,
             "quantity": request.quantity,
             "unit_price": unit_price,
-            "total_amount": amount,
-            "saga_id": saga_id,
-            "reservation_id": None,
-            "payment_id": None,
-            "status": "pending",
-            "failure_category": None,
+            "amount": amount,
             "correlation_id": correlation_id,
+            "saga_id": saga_id,
         }
-    )
+        execution_record = None
 
-    saga, compensation_tracker = create_order_processing_saga()
+        if durable_order_executor is not None:
+            try:
+                execution_record = await durable_order_executor.start_or_load(
+                    saga_context
+                )
+            except OrderExecutionConflict as exc:
+                raise HTTPException(status_code=409, detail=str(exc)) from None
+            saga_context = dict(execution_record["context"])
+            saga_id = execution_record["saga_id"]
+            unit_price = Decimal(str(saga_context["unit_price"]))
+            amount = Decimal(str(saga_context["amount"]))
+        else:
+            await persist_order_outcome(
+                {
+                    "order_id": order_id,
+                    "requested_product_id": request.product_id,
+                    "product_id": request.product_id,
+                    "quantity": request.quantity,
+                    "unit_price": unit_price,
+                    "total_amount": amount,
+                    "saga_id": saga_id,
+                    "reservation_id": None,
+                    "payment_id": None,
+                    "status": "pending",
+                    "failure_category": None,
+                    "correlation_id": correlation_id,
+                }
+            )
+
+    payment_adapter = (
+        durable_order_executor.payment_gateway
+        if durable_order_executor is not None
+        else None
+    )
+    saga, compensation_tracker = create_order_processing_saga(
+        payment_adapter=payment_adapter
+    )
 
     current_span = trace.get_current_span()
     if current_span.is_recording():
@@ -310,49 +363,64 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
             "unit_price": str(unit_price),
             "total_amount": str(amount),
             "saga_id": saga_id,
+            "recovery": existing is not None,
         },
     )
 
-    saga_context = {
-        "order_id": order_id,
-        "product_id": request.product_id,
-        "quantity": request.quantity,
-        "unit_price": unit_price,
-        "amount": amount,
-        "correlation_id": correlation_id,
-    }
-
     try:
-        result = await saga.run(saga_context, saga_id=saga_id)
+        if durable_order_executor is not None:
+            result = await durable_order_executor.execute(
+                saga,
+                compensation_tracker,
+                execution_record,
+            )
+        else:
+            result = await saga.run(saga_context, saga_id=saga_id)
+    except OrderExecutionBusy:
+        raise HTTPException(
+            status_code=409,
+            detail="This order is currently being recovered by another worker.",
+        ) from None
+    except OrderExecutionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
     except Exception as exc:
         incomplete_compensations = compensation_tracker.incomplete_steps
-        compensation_context = compensation_tracker.last_context
-        failure_category = classify_order_failure(exc)
+        if isinstance(exc, CompensationIncomplete):
+            incomplete_compensations = exc.steps
+        failure_category = (
+            exc.failure_category
+            if isinstance(exc, DurableOrderFailure)
+            else classify_order_failure(exc)
+        )
         outcome_status = (
             "compensation_incomplete"
             if incomplete_compensations
             else failure_category
         )
-        await persist_order_outcome(
-            {
-                "order_id": order_id,
-                "requested_product_id": request.product_id,
-                "product_id": request.product_id,
-                "quantity": request.quantity,
-                "unit_price": unit_price,
-                "total_amount": amount,
-                "saga_id": saga_id,
-                "reservation_id": compensation_context.get(
-                    "reservation_id", saga_context.get("reservation_id")
-                ),
-                "payment_id": compensation_context.get(
-                    "payment_id", saga_context.get("payment_id")
-                ),
-                "status": outcome_status,
-                "failure_category": failure_category,
-                "correlation_id": correlation_id,
-            }
-        )
+
+        try:
+            await persist_order_outcome(
+                {
+                    "order_id": order_id,
+                    "requested_product_id": request.product_id,
+                    "product_id": request.product_id,
+                    "quantity": request.quantity,
+                    "unit_price": unit_price,
+                    "total_amount": amount,
+                    "saga_id": saga_id,
+                    "reservation_id": saga_context.get("reservation_id"),
+                    "payment_id": saga_context.get("payment_id"),
+                    "status": outcome_status,
+                    "failure_category": failure_category,
+                    "correlation_id": saga_context.get(
+                        "correlation_id", correlation_id
+                    ),
+                }
+            )
+        except HTTPException:
+            if durable_order_executor is None:
+                raise
+
         logger.exception(
             "order.process.failed",
             extra={
@@ -387,7 +455,9 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
                 },
             ) from None
 
-        if isinstance(exc, PaymentDeclined):
+        if failure_category == "payment_declined" or isinstance(
+            exc, PaymentDeclined
+        ):
             raise HTTPException(
                 status_code=402,
                 detail="Payment declined; completed actions were compensated.",
@@ -419,6 +489,18 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
                 detail="Order processing timed out.",
             ) from None
 
+        if isinstance(exc, DurableOrderFailure):
+            if failure_category == "inventory_rejected":
+                raise HTTPException(
+                    status_code=409,
+                    detail="Inventory service rejected the reservation.",
+                ) from None
+            if failure_category == "product_not_found":
+                raise HTTPException(
+                    status_code=404,
+                    detail="Product not found.",
+                ) from None
+
         raise HTTPException(
             status_code=500,
             detail="Order processing failed; completed actions were compensated.",
@@ -439,11 +521,25 @@ async def process_order(order_id: int, request: ProcessOrderRequest):
     )
     return {
         "order_id": order_id,
-        "status": result["order_status"],
+        "status": result.get("order_status", "processed"),
         "saga_id": saga_id,
-        "correlation_id": correlation_id,
-        "reservation_id": result["reservation_id"],
-        "payment_id": result["payment_id"],
+        "correlation_id": saga_context.get("correlation_id", correlation_id),
+        "reservation_id": result.get("reservation_id"),
+        "payment_id": result.get("payment_id"),
         "unit_price": str(unit_price),
         "total_amount": str(amount),
     }
+
+
+@app.get("/orders/{order_id}/recovery", tags=["orders"])
+async def get_order_recovery(order_id: int):
+    """Expose durable Saga progress and reconciliation requirements."""
+    if durable_order_executor is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Durable order recovery is not enabled.",
+        )
+    view = await durable_order_executor.recovery_view(order_id)
+    if view is None:
+        raise HTTPException(status_code=404, detail="Order execution not found.")
+    return view
