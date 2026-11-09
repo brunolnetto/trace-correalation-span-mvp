@@ -226,7 +226,7 @@ class SupplierSimulation:
                     order
                     for order in self._purchase_orders.values()
                     if order["product_id"] == current_product_id
-                    and order["status"] in {"created", "ordered"}
+                    and order["status"] in {"created", "ordered", "receiving"}
                 ]
                 on_order = sum(order["quantity"] for order in active_orders)
                 available = int(inventory["on_hand"]) - int(inventory["reserved"])
