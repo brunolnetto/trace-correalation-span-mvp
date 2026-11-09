@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
@@ -325,6 +325,33 @@ class PostgresSupplierSimulation:
                 "SELECT * FROM supplier_reorder_policies ORDER BY product_id"
             )
             return [_policy(row) for row in await cursor.fetchall()]
+
+    async def evaluate_replenishment(
+        self,
+        client: httpx.AsyncClient,
+        correlation_id: str,
+        *,
+        product_id: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Read inventory through its API, then persist each decision transactionally."""
+        policies = await self.list_policies()
+        if product_id is not None:
+            policies = [
+                policy for policy in policies if policy["product_id"] == product_id
+            ]
+
+        decisions: list[dict[str, Any]] = []
+        for policy in policies:
+            current_product_id = policy["product_id"]
+            response = await client.get(
+                f"/inventory/{current_product_id}",
+                headers={"X-Correlation-ID": correlation_id},
+            )
+            response.raise_for_status()
+            decisions.append(
+                await self.evaluate_product(current_product_id, response.json())
+            )
+        return decisions
 
     async def _load_purchase_order(
         self, connection: Any, purchase_order_id: UUID
