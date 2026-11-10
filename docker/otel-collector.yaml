@@ -43,6 +43,11 @@ exporters:
       initial_interval: 1s
       max_interval: 10s
       max_elapsed_time: 60s
+  prometheus:
+    endpoint: 0.0.0.0:9464
+    metric_expiration: 5m
+    resource_to_telemetry_conversion:
+      enabled: true
   debug:
     verbosity: basic
 
@@ -67,4 +72,4 @@ service:
     metrics:
       receivers: [otlp]
       processors: [memory_limiter, batch]
-      exporters: [debug]
+      exporters: [debug, prometheus]
