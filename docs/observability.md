@@ -65,6 +65,43 @@ Filter by a trace ID copied from a log record:
 
 Loki's OTLP ingestion maps the service name to the `service_name` index label. Severity, trace/span IDs, and correlation ID remain structured metadata; they are not promoted to index labels. In particular, **never make correlation IDs metric labels**: their unbounded cardinality is appropriate for log filtering, not metric dimensions.
 
+## Verify gateway log searchability
+
+With the regular Compose stack running, execute:
+
+```bash
+uv run python scripts/verify-gateway-loki.py
+```
+
+The verifier sends a read-only `GET /inventory/7` through the gateway with
+fresh `X-Correlation-ID` and `X-Simulation-Request-ID` values. It then polls
+Loki's HTTP API for the gateway's forwarded-request log, filtering by
+`service_name` and the structured metadata fields `correlation_id`,
+`trace_id`, `span_id`, `route_id`, and `decision`. This demonstrates that
+the identifiers are searchable without promoting high-cardinality values to
+Loki index labels or metric dimensions. It does not change gateway policy or
+business state.
+
+Override endpoints or ingestion wait when needed:
+
+```bash
+uv run python scripts/verify-gateway-loki.py \\
+  --gateway-url http://127.0.0.1:18004 \\
+  --loki-url http://127.0.0.1:13100 \\
+  --timeout-seconds 60
+```
+
+The equivalent LogQL query, with the generated UUID substituted, is:
+
+```logql
+{service_name="gateway-simulator"}
+  | correlation_id="550e8400-e29b-41d4-a716-446655440000"
+  | trace_id!=""
+  | span_id!=""
+  | route_id="inventory"
+  | decision="forwarded"
+```
+
 ## Retention, queues, and loss behavior
 
 - Loki retention is configured to seven days on the local filesystem volume. This is a disposable development default, not a production durability policy.
