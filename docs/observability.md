@@ -85,9 +85,9 @@ business state.
 Override endpoints or ingestion wait when needed:
 
 ```bash
-uv run python scripts/verify-gateway-loki.py \\
-  --gateway-url http://127.0.0.1:18004 \\
-  --loki-url http://127.0.0.1:13100 \\
+uv run python scripts/verify-gateway-loki.py \
+  --gateway-url http://127.0.0.1:18004 \
+  --loki-url http://127.0.0.1:13100 \
   --timeout-seconds 60
 ```
 
