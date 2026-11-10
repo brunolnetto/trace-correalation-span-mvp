@@ -8,7 +8,10 @@ The project uses [Sagaz](https://github.com/brunolnetto/sagaz) to orchestrate
 order processing and compensation. The Inventory API owns the product catalog,
 stock balances, reservations, and movement ledger. A Supplier Simulation API
 models onboarding and replenishment; a versioned Event Collector persists
-structured service events for dbt analytics.
+structured service events for dbt analytics. The exhaustive component, edge,
+and end-to-end flow coverage inventory is maintained in
+[the flow coverage matrix](docs/flow-coverage-matrix.md), with a machine-readable
+[JSON manifest](docs/flow-coverage-matrix.json).
 
 ## Architecture
 
