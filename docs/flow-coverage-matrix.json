@@ -1,0 +1,2470 @@
+{
+  "schema_version": "1.0.0",
+  "title": "End-to-end component and edge coverage matrix",
+  "snapshot": {
+    "repository": "brunolnetto/trace-correalation-span-mvp",
+    "base_branch": "main",
+    "base_commit": "f85183b83fda02b7eec42e2cfe2ffd2942e7ca10",
+    "captured_on": "2026-11-09",
+    "scope_note": "The matrix describes the main-branch architecture at base_commit. PRs #39–#43 are merged and their implementation is included in this snapshot; their URLs remain as historical evidence."
+  },
+  "interpretation": {
+    "exhaustive_means": [
+      "Every known cross-component request, persistence, event-delivery, analytics, and observability boundary is represented by an edge.",
+      "Operations sharing the same component pair are grouped only when they have the same contract and failure semantics; materially different operations have separate edges.",
+      "Flows are ordered paths through edge IDs, including asynchronous and recovery paths.",
+      "A telemetry backend edge is not considered covered unless its producer-to-Collector edge is also represented.",
+      "A flow's edge_path is an ordered set of participating interaction boundaries, not necessarily a strict graph walk: synchronous responses return to the caller implicitly, and observability fan-out creates parallel branches."
+    ],
+    "evidence_semantics": {
+      "automated_evidence": "A test file or function exists. Presence is not a claim that the suite was executed during this matrix update.",
+      "live_reported_pass": "A local runtime validation was reported as passing by the user in the project conversation; the linked PR remains open unless explicitly stated otherwise.",
+      "reproducible_script": "A reproducible script exists; no successful execution is inferred from its presence.",
+      "documented_only": "The behavior is described in repository documentation but no edge-specific automated or live evidence was found.",
+      "gap": "No adequate edge-specific evidence was found for the stated contract."
+    },
+    "coverage_levels": {
+      "covered": "The defined contract has relevant automated evidence and sufficient reported live evidence for the stated scope.",
+      "partial": "Some contract dimensions are tested, but one or more important operations, runtime boundaries, failure cases, or deployments remain unverified.",
+      "gap": "A meaningful contract or failure boundary has no adequate edge-specific verification.",
+      "not_applicable": "No test is expected for this edge in the current architecture."
+    },
+    "important_caveats": [
+      "Main currently contains the Gateway implementation from PR #38. PRs #39-#43 are open and unmerged in this snapshot.",
+      "A mocked HTTPX transport, ASGI test client, repository integration test, and live Compose test prove different things. They are not interchangeable evidence.",
+      "Gateway ingress rejection happens before Order API execution. It does not prove the behavior of an Order Saga after a downstream Inventory failure.",
+      "The payment adapter is an internal component of Order API, not a separate deployed service.",
+      "The Event Collector is the analytical business-event sink. Loki is the diagnostic-log sink. They are not interchangeable.",
+      "Prometheus scrapes the Collector's Prometheus exporter; the Collector does not push metrics into Prometheus.",
+      "No CI result is inferred from local test evidence or from the existence of a workflow."
+    ]
+  },
+  "nodes": [
+    {
+      "id": "external_client",
+      "kind": "actor",
+      "description": "External API caller or operator."
+    },
+    {
+      "id": "order_generator",
+      "kind": "worker",
+      "description": "Deterministic order workload generator."
+    },
+    {
+      "id": "simulation_runner",
+      "kind": "worker",
+      "description": "Finite end-to-end business simulation runner."
+    },
+    {
+      "id": "gateway",
+      "kind": "service",
+      "path": "app/gateway_simulator/main.py",
+      "description": "Local reverse proxy, route policy and deterministic fault injection."
+    },
+    {
+      "id": "order_api",
+      "kind": "service",
+      "path": "app/order/main.py",
+      "description": "Order HTTP API and Saga coordinator."
+    },
+    {
+      "id": "payment_adapter",
+      "kind": "internal_component",
+      "path": "app/order/workflow.py; app/order/durable.py",
+      "description": "Process-local or PostgreSQL-backed demo payment adapter; not a network service."
+    },
+    {
+      "id": "inventory_api",
+      "kind": "service",
+      "path": "app/inventory/main.py",
+      "description": "Catalog, stock, reservation, receipt, adjustment and movement ownership."
+    },
+    {
+      "id": "supplier_api",
+      "kind": "service",
+      "path": "app/supplier_simulator/main.py",
+      "description": "Supplier catalog, replenishment policies, purchase orders and simulated clock."
+    },
+    {
+      "id": "postgres",
+      "kind": "database",
+      "description": "Durable Order, Inventory, Supplier and transactional-outbox state."
+    },
+    {
+      "id": "outbox_dispatcher",
+      "kind": "worker_service",
+      "path": "app/outbox_dispatcher/main.py; app/persistence/outbox.py",
+      "description": "Leased, bounded, at-least-once business-event delivery."
+    },
+    {
+      "id": "event_collector",
+      "kind": "service",
+      "path": "app/event_collector/main.py",
+      "description": "Versioned event ingestion, deduplication and quarantine."
+    },
+    {
+      "id": "event_volume",
+      "kind": "storage",
+      "description": "Persistent JSONL event and quarantine files on the event-data volume."
+    },
+    {
+      "id": "analytics_runner",
+      "kind": "worker",
+      "description": "Finite dbt/DuckDB analytics execution."
+    },
+    {
+      "id": "duckdb",
+      "kind": "database",
+      "description": "Analytics database populated by dbt from raw JSONL events."
+    },
+    {
+      "id": "run_state_volume",
+      "kind": "storage",
+      "description": "Standalone simulation report shared with analytics execution."
+    },
+    {
+      "id": "otel_collector",
+      "kind": "telemetry_service",
+      "description": "OTLP receiver and telemetry exporter pipeline."
+    },
+    {
+      "id": "jaeger",
+      "kind": "telemetry_backend",
+      "description": "Distributed trace storage and UI."
+    },
+    {
+      "id": "loki",
+      "kind": "telemetry_backend",
+      "description": "Searchable diagnostic log storage."
+    },
+    {
+      "id": "prometheus",
+      "kind": "telemetry_backend",
+      "description": "Scrapes the Collector Prometheus exporter and stores metrics."
+    },
+    {
+      "id": "grafana",
+      "kind": "telemetry_ui",
+      "description": "Queries configured Prometheus and Loki data sources."
+    },
+    {
+      "id": "analytics_data_volume",
+      "kind": "storage",
+      "description": "Persistent analytics-data volume holding the DuckDB database, dbt target directory and analytics run report."
+    }
+  ],
+  "evidence_catalog": [
+    {
+      "id": "EV-GW-UNIT",
+      "kind": "automated_test",
+      "ref": "tests/test_gateway_simulator.py",
+      "scope": "Route matching, policy revision/CAS, deterministic decisions, proxy behavior, timeout/fault injection, concurrency limits and gateway SDK metric dimensions."
+    },
+    {
+      "id": "EV-ORDER-API",
+      "kind": "automated_test",
+      "ref": "tests/test_order_api.py",
+      "scope": "Order API contract using ASGI and an HTTPX MockTransport Inventory dependency; success, payment decline, failed compensation, reservation conflict, inactive/unknown product."
+    },
+    {
+      "id": "EV-ORDER-REPO",
+      "kind": "automated_test",
+      "ref": "tests/test_postgres_order_repository.py",
+      "scope": "Order persistence across pool restart and Order API persistence contract."
+    },
+    {
+      "id": "EV-ORDER-SAGA",
+      "kind": "automated_test",
+      "ref": "tests/test_postgres_order_saga_recovery.py",
+      "scope": "Durable Saga checkpoint replay, real PostgreSQL Inventory store effects, payment idempotency, compensation restart and reconciliation-required state."
+    },
+    {
+      "id": "EV-INVENTORY-UNIT",
+      "kind": "automated_test",
+      "ref": "tests/test_inventory_store.py",
+      "scope": "Catalog invariants, receipt/adjustment idempotency, reservation lifecycle, consistency and concurrent no-oversell behavior."
+    },
+    {
+      "id": "EV-INVENTORY-PG",
+      "kind": "automated_test",
+      "ref": "tests/test_postgres_inventory_store.py",
+      "scope": "PostgreSQL API contract, transaction rollback, pool restart, multi-process concurrency, constraints and movement journal."
+    },
+    {
+      "id": "EV-SUPPLIER-UNIT",
+      "kind": "automated_test",
+      "ref": "tests/test_supplier_simulator.py",
+      "scope": "Onboarding, replenishment, PO lifecycle, lead-time receipt, response-loss retry and idempotency using an Inventory double."
+    },
+    {
+      "id": "EV-SUPPLIER-PG",
+      "kind": "automated_test",
+      "ref": "tests/test_postgres_supplier_simulator.py",
+      "scope": "Supplier state across process restarts and receipt response loss."
+    },
+    {
+      "id": "EV-OUTBOX",
+      "kind": "automated_test",
+      "ref": "tests/test_postgres_outbox.py",
+      "scope": "Domain/outbox atomicity, event immutability, leases, concurrent dispatchers, retry, blocked events, lost acknowledgement and producer restart."
+    },
+    {
+      "id": "EV-COLLECTOR",
+      "kind": "automated_test",
+      "ref": "tests/test_event_collector.py",
+      "scope": "Envelope identity, append durability, restart recovery, deduplication, quarantine and malformed/incomplete JSONL recovery."
+    },
+    {
+      "id": "EV-GENERATOR",
+      "kind": "automated_test",
+      "ref": "tests/test_order_generator.py",
+      "scope": "Deterministic plans, order request execution, correlation propagation, transport errors and Collector batch publishing."
+    },
+    {
+      "id": "EV-RUNNER",
+      "kind": "automated_test",
+      "ref": "tests/test_standalone_runner.py",
+      "scope": "Simulation batches, replenishment, fail-fast behavior, Collector barrier and machine-readable report."
+    },
+    {
+      "id": "EV-OBS",
+      "kind": "automated_test",
+      "ref": "tests/test_observability.py",
+      "scope": "Correlation ID creation/validation/propagation and structured log context; does not establish full exporter-to-backend delivery."
+    },
+    {
+      "id": "EV-REPRO",
+      "kind": "reproducible_script",
+      "ref": "scripts/reproduce-local.sh",
+      "scope": "Documented isolated Compose reproduction spanning APIs, orders, Supplier, generator, Jaeger/log/event checks and dbt build. Script presence alone is not a reported successful run."
+    },
+    {
+      "id": "EV-ANALYTICS",
+      "kind": "analytics_contract",
+      "ref": "analytics/models/schema.yml; analytics/README.md",
+      "scope": "dbt model contracts and analytics facts for orders, inventory movements, generator reconciliation and supplier lifecycle."
+    },
+    {
+      "id": "EV-PR39",
+      "kind": "open_pull_request",
+      "ref": "https://github.com/brunolnetto/trace-correalation-span-mvp/pull/39",
+      "state_at_snapshot": "merged",
+      "scope": "ASGI gateway trace-context test and live Jaeger trace continuity verifier; user-reported local tests and live trace verification passed."
+    },
+    {
+      "id": "EV-PR40",
+      "kind": "open_pull_request",
+      "ref": "https://github.com/brunolnetto/trace-correalation-span-mvp/pull/40",
+      "state_at_snapshot": "merged",
+      "scope": "Live gateway Inventory baseline, 429, injected 503, timeout 504 and policy recovery verifier; user-reported live validation passed."
+    },
+    {
+      "id": "EV-PR41",
+      "kind": "open_pull_request",
+      "ref": "https://github.com/brunolnetto/trace-correalation-span-mvp/pull/41",
+      "state_at_snapshot": "merged",
+      "scope": "Live Gateway-to-Loki correlation/trace/span searchable-log verifier; user-reported live validation passed."
+    },
+    {
+      "id": "EV-PR42",
+      "kind": "open_pull_request",
+      "ref": "https://github.com/brunolnetto/trace-correalation-span-mvp/pull/42",
+      "state_at_snapshot": "merged",
+      "scope": "Collector Prometheus exporter, Prometheus scrape and Gateway counter-increment verifier; user-reported runtime validation passed, Grafana query itself not verified."
+    },
+    {
+      "id": "EV-PR43",
+      "kind": "open_pull_request",
+      "ref": "https://github.com/brunolnetto/trace-correalation-span-mvp/pull/43",
+      "state_at_snapshot": "merged",
+      "scope": "Live Gateway ingress-to-Order Saga baseline, replay and injected ingress failure; user-reported Ruff, five verifier tests and live E2E passed. Does not exercise an Inventory dependency outage."
+    }
+  ],
+  "edges": [
+    {
+      "id": "E01",
+      "source": "external_client",
+      "destination": "gateway",
+      "boundary": "HTTP ingress",
+      "operations": [
+        "Any routed request",
+        "X-Correlation-ID and W3C traceparent intake",
+        "Policy admission, throttling, timeout and deterministic failure decisions"
+      ],
+      "failure_modes": [
+        "Invalid/unmatched route",
+        "Rate limit or max-in-flight rejection",
+        "Injected 5xx/timeout",
+        "Gateway process unavailable",
+        "Malformed or missing context headers"
+      ],
+      "evidence": [
+        "EV-GW-UNIT",
+        "EV-PR40",
+        "EV-PR43"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "reported_pass_open_pr",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "No complete live route-family matrix for all three upstreams.",
+        "PR #43 validates ingress rejection before Order execution, not a downstream service failure."
+      ]
+    },
+    {
+      "id": "E02",
+      "source": "gateway",
+      "destination": "order_api",
+      "boundary": "HTTP reverse-proxy route /orders",
+      "operations": [
+        "GET /orders/{order_id}",
+        "POST /orders/{order_id}/process",
+        "GET /orders/{order_id}/recovery"
+      ],
+      "failure_modes": [
+        "Gateway rejection before Order receives request",
+        "Order 4xx/5xx propagation",
+        "Order timeout/upstream unavailable",
+        "Request/response header or body propagation defects"
+      ],
+      "evidence": [
+        "EV-GW-UNIT",
+        "EV-PR39",
+        "EV-PR43"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "reported_pass_open_pr",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Live Saga verifier covers baseline/replay and gateway ingress fault only.",
+        "No live downstream Inventory outage through a running Order Saga."
+      ]
+    },
+    {
+      "id": "E03",
+      "source": "gateway",
+      "destination": "inventory_api",
+      "boundary": "HTTP reverse-proxy routes /products and /inventory",
+      "operations": [
+        "Product catalog operations",
+        "Inventory snapshot",
+        "Receipts, adjustments and reservations when called through ingress"
+      ],
+      "failure_modes": [
+        "Injected 5xx",
+        "Injected timeout",
+        "429/overload",
+        "Inventory unavailable",
+        "Gateway recovery after policy restoration"
+      ],
+      "evidence": [
+        "EV-GW-UNIT",
+        "EV-PR40",
+        "EV-PR41",
+        "EV-PR42"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "reported_pass_open_pr",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Live scenario PR #40 exercises GET /inventory/7, not every mutating Inventory route.",
+        "No exhaustive live gateway checks for reservation, release, receipt and adjustment."
+      ]
+    },
+    {
+      "id": "E04",
+      "source": "gateway",
+      "destination": "supplier_api",
+      "boundary": "HTTP reverse-proxy Supplier route families",
+      "operations": [
+        "/supplier-catalog",
+        "/reorder-policies",
+        "/replenishments",
+        "/purchase-orders",
+        "/clock"
+      ],
+      "failure_modes": [
+        "Injected 5xx or timeout",
+        "Supplier unavailable",
+        "Gateway route mismatch",
+        "Policy update during in-flight request"
+      ],
+      "evidence": [
+        "EV-GW-UNIT",
+        "EV-REPRO"
+      ],
+      "coverage": {
+        "automated": "partial",
+        "live": "documented_only",
+        "assessment": "gap"
+      },
+      "gaps": [
+        "No Supplier-specific live gateway verifier.",
+        "No evidence that all Supplier route prefixes are mapped correctly under Compose."
+      ]
+    },
+    {
+      "id": "E05",
+      "source": "external_client",
+      "destination": "order_api",
+      "boundary": "Direct HTTP API, bypassing Gateway",
+      "operations": [
+        "Direct Order API request and health/readiness access"
+      ],
+      "failure_modes": [
+        "Direct service unavailable",
+        "Contract divergence between direct and Gateway ingress",
+        "Correlation/trace behavior differs when Gateway is bypassed"
+      ],
+      "evidence": [
+        "EV-ORDER-API",
+        "EV-ORDER-REPO",
+        "EV-REPRO"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "documented_only",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "ASGI tests do not prove direct host-port networking.",
+        "No dedicated live direct-vs-Gateway contract comparison."
+      ]
+    },
+    {
+      "id": "E06",
+      "source": "external_client",
+      "destination": "inventory_api",
+      "boundary": "Direct HTTP API, bypassing Gateway",
+      "operations": [
+        "Product create/read/update",
+        "Inventory read",
+        "Receipt/adjustment",
+        "Reservation/release/commit"
+      ],
+      "failure_modes": [
+        "API unavailable",
+        "Validation/conflict responses",
+        "Concurrent writes",
+        "Database transaction rollback"
+      ],
+      "evidence": [
+        "EV-INVENTORY-UNIT",
+        "EV-INVENTORY-PG",
+        "EV-REPRO"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "reproducible_script_only",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "No recent edge-by-edge live direct API report attached to this matrix.",
+        "The full route contract should be explicitly checked over the Compose host port."
+      ]
+    },
+    {
+      "id": "E07",
+      "source": "external_client",
+      "destination": "supplier_api",
+      "boundary": "Direct HTTP API, bypassing Gateway",
+      "operations": [
+        "Supplier onboarding",
+        "Reorder policy",
+        "Replenishment",
+        "Purchase-order lifecycle",
+        "Simulation clock"
+      ],
+      "failure_modes": [
+        "Supplier unavailable",
+        "Inventory dependency failure mapped to 502/503",
+        "Invalid PO transition",
+        "Duplicate or conflicting requests"
+      ],
+      "evidence": [
+        "EV-SUPPLIER-UNIT",
+        "EV-SUPPLIER-PG",
+        "EV-REPRO"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "reproducible_script_only",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "No dedicated live direct Supplier API contract report was found in the current evidence set."
+      ]
+    },
+    {
+      "id": "E08",
+      "source": "order_api",
+      "destination": "inventory_api",
+      "boundary": "HTTP dependency: product/catalog and reservation",
+      "operations": [
+        "GET /products/{product_id} preflight and catalog-derived unit-price lookup"
+      ],
+      "failure_modes": [
+        "404 unknown product",
+        "Inactive product",
+        "Invalid/missing catalog data",
+        "Inventory 5xx/connection error/timeout"
+      ],
+      "evidence": [
+        "EV-ORDER-API",
+        "EV-ORDER-SAGA",
+        "EV-INVENTORY-PG"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "none",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Order API tests inject catalog errors through HTTPX MockTransport.",
+        "No live Compose test injects catalog lookup failure before Saga creation."
+      ]
+    },
+    {
+      "id": "E09",
+      "source": "order_api",
+      "destination": "inventory_api",
+      "boundary": "HTTP dependency: read-only inventory lookup",
+      "operations": [
+        "GET /inventory/{order_id} from GET /orders/{order_id}"
+      ],
+      "failure_modes": [
+        "Inventory 404/5xx",
+        "Connection refused",
+        "Timeout",
+        "Invalid Inventory response"
+      ],
+      "evidence": [],
+      "coverage": {
+        "automated": "gap",
+        "live": "none",
+        "assessment": "gap"
+      },
+      "gaps": [
+        "No dedicated test for the legacy GET /orders/{order_id} Inventory lookup path was found.",
+        "Add Order API contract tests for success and each dependency failure class."
+      ]
+    },
+    {
+      "id": "E10",
+      "source": "order_api",
+      "destination": "inventory_api",
+      "boundary": "HTTP compensation call",
+      "operations": [
+        "DELETE /inventory/reservations/{reservation_id} via release_inventory"
+      ],
+      "failure_modes": [
+        "Release rejected",
+        "Inventory unavailable",
+        "Response lost after release commits",
+        "Compensation retry after Order API restart"
+      ],
+      "evidence": [
+        "EV-ORDER-API",
+        "EV-ORDER-SAGA",
+        "EV-INVENTORY-PG"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "none",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Automated tests establish failure visibility and idempotent recovery.",
+        "No live Compose compensation test with Inventory failing during release and subsequent recovery."
+      ]
+    },
+    {
+      "id": "E11",
+      "source": "order_api",
+      "destination": "payment_adapter",
+      "boundary": "In-process adapter call",
+      "operations": [
+        "Charge payment through the in-process adapter"
+      ],
+      "failure_modes": [
+        "Deterministic payment decline",
+        "Adapter/database error",
+        "Charge commits before Saga checkpoint",
+        "Retry of same Saga/payment identity"
+      ],
+      "evidence": [
+        "EV-ORDER-API",
+        "EV-ORDER-SAGA"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "reported_pass_open_pr",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Adapter charge and durable idempotency are covered by tests.",
+        "Refund is modelled as a separate compensation edge."
+      ]
+    },
+    {
+      "id": "E12",
+      "source": "order_api",
+      "destination": "postgres",
+      "boundary": "Durable persistence",
+      "operations": [
+        "Order outcome persistence",
+        "Saga execution and step checkpoints",
+        "Payment charge/refund ledger",
+        "Startup recovery reads and writes"
+      ],
+      "failure_modes": [
+        "Database unavailable",
+        "Transaction rollback",
+        "Process restart between remote side effect and checkpoint",
+        "Advisory-lock contention",
+        "Recovery action failure"
+      ],
+      "evidence": [
+        "EV-ORDER-REPO",
+        "EV-ORDER-SAGA"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "documented_only",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Strong isolated PostgreSQL integration evidence exists.",
+        "No dedicated full-stack live database-outage scenario during an active Order Saga."
+      ]
+    },
+    {
+      "id": "E13",
+      "source": "inventory_api",
+      "destination": "postgres",
+      "boundary": "Durable persistence",
+      "operations": [
+        "Catalog writes",
+        "Stock receipts and adjustments",
+        "Reservation create/release/commit",
+        "Movement ledger and transactional outbox"
+      ],
+      "failure_modes": [
+        "Transaction abort after partial SQL work",
+        "Constraint violation",
+        "Concurrent reservation/receipt/adjustment",
+        "Pool restart",
+        "Database unavailable"
+      ],
+      "evidence": [
+        "EV-INVENTORY-UNIT",
+        "EV-INVENTORY-PG"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "documented_only",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Concurrency and rollback are covered in isolated PostgreSQL tests.",
+        "No live operational test kills/restarts PostgreSQL while API traffic is active."
+      ]
+    },
+    {
+      "id": "E14",
+      "source": "supplier_api",
+      "destination": "inventory_api",
+      "boundary": "HTTP dependency: catalog/onboarding",
+      "operations": [
+        "POST /products during supplier onboarding",
+        "GET /products fallback to recover an uncertain catalog create by SKU"
+      ],
+      "failure_modes": [
+        "Duplicate SKU/409",
+        "Inventory unavailable",
+        "Product created but Supplier crashes before persisting onboarding",
+        "Recovery lookup fails or returns ambiguous catalog state"
+      ],
+      "evidence": [
+        "EV-SUPPLIER-UNIT",
+        "EV-SUPPLIER-PG"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "none",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Onboarding recovery is tested with doubles and Supplier persistence tests.",
+        "No live Compose outage/response-loss scenario across Supplier and Inventory HTTP."
+      ]
+    },
+    {
+      "id": "E15",
+      "source": "supplier_api",
+      "destination": "inventory_api",
+      "boundary": "HTTP dependency: replenishment read",
+      "operations": [
+        "GET /inventory/{product_id}",
+        "Calculate inventory position and decide whether to reorder"
+      ],
+      "failure_modes": [
+        "Inventory unavailable",
+        "Missing product/balance",
+        "Stale/incorrect inventory position",
+        "Reservation changes during supplier lead time"
+      ],
+      "evidence": [
+        "EV-SUPPLIER-UNIT"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "reproducible_script_only",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "No explicit live Supplier-through-Gateway replenishment flow.",
+        "No live fault injection for failed balance reads."
+      ]
+    },
+    {
+      "id": "E16",
+      "source": "supplier_api",
+      "destination": "inventory_api",
+      "boundary": "HTTP dependency: receipt commit",
+      "operations": [
+        "POST /inventory/{product_id}/receipts with supplier-po idempotency key"
+      ],
+      "failure_modes": [
+        "Inventory rejection",
+        "Inventory unavailable",
+        "Inventory commits but response is lost",
+        "Supplier restart while PO is receiving",
+        "Retry after uncertain acknowledgement"
+      ],
+      "evidence": [
+        "EV-SUPPLIER-UNIT",
+        "EV-SUPPLIER-PG",
+        "EV-INVENTORY-PG"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "none",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Response-loss and process-restart semantics are covered by automated tests.",
+        "No live Compose end-to-end receipt/replay through Supplier and Gateway."
+      ]
+    },
+    {
+      "id": "E17",
+      "source": "supplier_api",
+      "destination": "postgres",
+      "boundary": "Durable persistence",
+      "operations": [
+        "Supplier offering/onboarding reference",
+        "Reorder policy/version",
+        "Purchase order and transition history",
+        "Simulation clock"
+      ],
+      "failure_modes": [
+        "Database unavailable",
+        "Transaction failure",
+        "Supplier process restart",
+        "Concurrent PO lifecycle transition"
+      ],
+      "evidence": [
+        "EV-SUPPLIER-PG"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "none",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "PostgreSQL restart persistence is covered in integration tests.",
+        "No live full-stack Supplier database outage/recovery exercise."
+      ]
+    },
+    {
+      "id": "E18",
+      "source": "postgres",
+      "destination": "outbox_dispatcher",
+      "boundary": "Transactional outbox polling",
+      "operations": [
+        "Read pending events",
+        "Claim leases with FOR UPDATE SKIP LOCKED",
+        "Reclaim expired leases"
+      ],
+      "failure_modes": [
+        "Dispatcher unavailable",
+        "Expired lease",
+        "Two dispatchers racing",
+        "Database session loss"
+      ],
+      "evidence": [
+        "EV-OUTBOX"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "none",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Multi-dispatcher and lease recovery tests exist.",
+        "No live Compose test pauses/kills a dispatcher with pending events and observes lease recovery."
+      ]
+    },
+    {
+      "id": "E19",
+      "source": "outbox_dispatcher",
+      "destination": "postgres",
+      "boundary": "Transactional outbox state updates",
+      "operations": [
+        "Persist attempts and retry schedule",
+        "Mark delivered after valid acknowledgement",
+        "Mark permanent failures blocked"
+      ],
+      "failure_modes": [
+        "Lost DB connection after Collector acknowledgement",
+        "Lease ownership lost",
+        "Retry exhaustion",
+        "Malformed acknowledgement"
+      ],
+      "evidence": [
+        "EV-OUTBOX"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "none",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Isolated integration tests cover retry, blocked state and lease ownership.",
+        "No live operational verification of outbox stats/blocked endpoints during injected Collector outage."
+      ]
+    },
+    {
+      "id": "E20",
+      "source": "outbox_dispatcher",
+      "destination": "event_collector",
+      "boundary": "HTTP at-least-once delivery",
+      "operations": [
+        "POST /v1/events",
+        "Validate accepted/duplicate/quarantined acknowledgement"
+      ],
+      "failure_modes": [
+        "Connection refused",
+        "Timeout",
+        "408/409/425/429/5xx retry",
+        "Permanent 4xx or malformed acknowledgement",
+        "Collector persists then response is lost"
+      ],
+      "evidence": [
+        "EV-OUTBOX"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "none",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Mocked transport integration tests cover retry and lost acknowledgement.",
+        "No live Compose test stops Collector, creates pending events, restores Collector and proves delivery."
+      ]
+    },
+    {
+      "id": "E21",
+      "source": "event_collector",
+      "destination": "event_volume",
+      "boundary": "Durable file append",
+      "operations": [
+        "Append accepted events to events.jsonl",
+        "Append invalid/conflicting events to quarantine.jsonl",
+        "Recover index from disk on startup"
+      ],
+      "failure_modes": [
+        "Disk/write failure",
+        "Duplicate event ID",
+        "Conflicting payload under same ID",
+        "Malformed/incomplete final JSONL record",
+        "Collector restart"
+      ],
+      "evidence": [
+        "EV-COLLECTOR"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "none",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Append, restart, dedupe and quarantine are unit-tested.",
+        "No container-level volume-full or filesystem-permission failure exercise."
+      ]
+    },
+    {
+      "id": "E22",
+      "source": "order_generator",
+      "destination": "gateway",
+      "boundary": "HTTP workload ingress",
+      "operations": [
+        "Deterministic order plan execution through configured ORDER_API_URL"
+      ],
+      "failure_modes": [
+        "Gateway 429/5xx/timeout",
+        "Network error",
+        "Unexpected domain or transport response",
+        "Partial batch completion"
+      ],
+      "evidence": [
+        "EV-GENERATOR",
+        "EV-REPRO"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "reproducible_script_only",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Generator client behavior is tested with injected transports.",
+        "No reported live generator workload against Gateway with a complete fault/recovery distribution."
+      ]
+    },
+    {
+      "id": "E23",
+      "source": "order_generator",
+      "destination": "event_collector",
+      "boundary": "Best-effort HTTP event publishing",
+      "operations": [
+        "POST generator attempt and run-summary events"
+      ],
+      "failure_modes": [
+        "Collector unavailable",
+        "Transport failure",
+        "Partial batch acceptance",
+        "Best-effort event loss"
+      ],
+      "evidence": [
+        "EV-GENERATOR",
+        "EV-COLLECTOR"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "none",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Batch publishing and envelope storage are tested separately.",
+        "No live assertion that every generator attempt reconciles with Collector facts after Collector failure."
+      ]
+    },
+    {
+      "id": "E24",
+      "source": "simulation_runner",
+      "destination": "gateway",
+      "boundary": "HTTP multi-service orchestration",
+      "operations": [
+        "Order batches",
+        "Inventory scenario requests",
+        "Supplier onboarding/replenishment/receipt workflow"
+      ],
+      "failure_modes": [
+        "Any upstream API unavailable",
+        "Injected gateway policy decision",
+        "Cross-service partial completion",
+        "Non-deterministic external state"
+      ],
+      "evidence": [
+        "EV-RUNNER",
+        "EV-REPRO"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "reproducible_script_only",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Runner logic is tested with controlled transports.",
+        "No reported execution of a complete standalone run specifically through all Gateway route families."
+      ]
+    },
+    {
+      "id": "E25",
+      "source": "simulation_runner",
+      "destination": "event_collector",
+      "boundary": "HTTP event barrier/readback",
+      "operations": [
+        "Poll Collector for expected business events before simulation completion"
+      ],
+      "failure_modes": [
+        "Collector unavailable",
+        "Expected events delayed",
+        "Missing event",
+        "Readback timeout"
+      ],
+      "evidence": [
+        "EV-RUNNER"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "reproducible_script_only",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Missing-event timeout is tested.",
+        "No live test delays dispatch and proves the barrier eventually observes the full event set."
+      ]
+    },
+    {
+      "id": "E26",
+      "source": "simulation_runner",
+      "destination": "run_state_volume",
+      "boundary": "Simulation report persistence",
+      "operations": [
+        "Write machine-readable simulation report"
+      ],
+      "failure_modes": [
+        "Write/rename failure",
+        "Invalid report",
+        "Runner exits before report finalization"
+      ],
+      "evidence": [
+        "EV-RUNNER"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "not_required",
+        "assessment": "covered"
+      },
+      "gaps": []
+    },
+    {
+      "id": "E27",
+      "source": "run_state_volume",
+      "destination": "analytics_runner",
+      "boundary": "Report handoff",
+      "operations": [
+        "Analytics runner reads completed Simulation Runner report"
+      ],
+      "failure_modes": [
+        "Missing report",
+        "Malformed report",
+        "Simulation failed and analytics must not start"
+      ],
+      "evidence": [
+        "EV-RUNNER",
+        "EV-REPRO"
+      ],
+      "coverage": {
+        "automated": "partial",
+        "live": "reproducible_script_only",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "The standalone orchestration contract is covered at runner level; add an explicit analytics-runner test for missing/malformed report and non-success status if absent from the current suite."
+      ]
+    },
+    {
+      "id": "E28",
+      "source": "event_volume",
+      "destination": "analytics_runner",
+      "boundary": "Raw event ingestion into dbt/DuckDB",
+      "operations": [
+        "Read events.jsonl",
+        "Build staging and fact models",
+        "Reconcile generator attempts and service outcomes"
+      ],
+      "failure_modes": [
+        "Empty/missing file",
+        "Malformed or unsupported records",
+        "Quarantined events excluded",
+        "Missing/mismatched correlation outcomes",
+        "Duplicate source movements"
+      ],
+      "evidence": [
+        "EV-ANALYTICS",
+        "EV-REPRO"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "reproducible_script_only",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "dbt model contracts and singular reconciliation tests exist.",
+        "No current live report is attached proving the full business event population reconciles after a fault-injected run."
+      ]
+    },
+    {
+      "id": "E29",
+      "source": "order_api",
+      "destination": "otel_collector",
+      "boundary": "OTLP trace export",
+      "operations": [
+        "Order server spans",
+        "Outbound HTTPX client spans",
+        "Saga/business spans where instrumented"
+      ],
+      "failure_modes": [
+        "Missing trace context",
+        "Broken parent/child relationship",
+        "Collector unavailable",
+        "Exporter queue/drop/timeout"
+      ],
+      "evidence": [
+        "EV-OBS",
+        "EV-PR39"
+      ],
+      "coverage": {
+        "automated": "partial",
+        "live": "reported_pass_open_pr",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "PR #39 validates Gateway-to-Order trace continuity, not all Order-to-Inventory and Saga spans.",
+        "Detailed Sagaz action/compensation spans are documented as a separate observability iteration."
+      ]
+    },
+    {
+      "id": "E30",
+      "source": "inventory_api",
+      "destination": "otel_collector",
+      "boundary": "OTLP trace export",
+      "operations": [
+        "Inventory server spans",
+        "HTTPX client spans for Inventory outbound calls where instrumented"
+      ],
+      "failure_modes": [
+        "Context loss across inbound HTTP",
+        "OTLP export failure",
+        "Missing trace/span fields in logs"
+      ],
+      "evidence": [
+        "EV-OBS",
+        "EV-PR39"
+      ],
+      "coverage": {
+        "automated": "partial",
+        "live": "reported_pass_open_pr",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "The live trace included Inventory in PR #39's reported trace, but there is no service-specific Inventory exporter-failure test."
+      ]
+    },
+    {
+      "id": "E31",
+      "source": "supplier_api",
+      "destination": "otel_collector",
+      "boundary": "OTLP trace export",
+      "operations": [
+        "Supplier server spans",
+        "HTTPX client spans for Supplier-to-Inventory calls where instrumented"
+      ],
+      "failure_modes": [
+        "Context loss through Supplier-to-Inventory HTTPX",
+        "OTLP export failure",
+        "Missing trace/span fields in logs"
+      ],
+      "evidence": [
+        "EV-OBS"
+      ],
+      "coverage": {
+        "automated": "partial",
+        "live": "none",
+        "assessment": "gap"
+      },
+      "gaps": [
+        "No Supplier-specific trace continuity or diagnostic-log search live verifier."
+      ]
+    },
+    {
+      "id": "E32",
+      "source": "outbox_dispatcher",
+      "destination": "otel_collector",
+      "boundary": "OTLP trace export",
+      "operations": [
+        "Outbox Dispatcher server spans",
+        "HTTP client spans for Collector delivery where instrumented"
+      ],
+      "failure_modes": [
+        "Missing async trace context",
+        "OTLP export failure",
+        "Correlation context not retained in background dispatch"
+      ],
+      "evidence": [
+        "EV-OBS"
+      ],
+      "coverage": {
+        "automated": "partial",
+        "live": "none",
+        "assessment": "gap"
+      },
+      "gaps": [
+        "No live outbox-dispatcher trace/log search verifier with event ID and correlation ID."
+      ]
+    },
+    {
+      "id": "E33",
+      "source": "event_collector",
+      "destination": "otel_collector",
+      "boundary": "OTLP trace export",
+      "operations": [
+        "Event Collector server spans",
+        "Ingestion request spans where instrumented"
+      ],
+      "failure_modes": [
+        "OTLP export failure",
+        "Self-generated HTTPX log recursion",
+        "Missing trace context"
+      ],
+      "evidence": [
+        "EV-COLLECTOR",
+        "EV-OBS"
+      ],
+      "coverage": {
+        "automated": "partial",
+        "live": "none",
+        "assessment": "gap"
+      },
+      "gaps": [
+        "A test prevents Collector HTTPX transport logs from forwarding recursively.",
+        "No Collector-to-Loki/Jaeger live search proof for ingestion requests."
+      ]
+    },
+    {
+      "id": "E34",
+      "source": "otel_collector",
+      "destination": "jaeger",
+      "boundary": "OTLP trace export",
+      "operations": [
+        "Export received application spans to Jaeger"
+      ],
+      "failure_modes": [
+        "Jaeger unavailable",
+        "Collector exporter error/retry",
+        "Trace sampling or loss"
+      ],
+      "evidence": [
+        "EV-PR39",
+        "EV-REPRO"
+      ],
+      "coverage": {
+        "automated": "documented",
+        "live": "reported_pass_open_pr",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Live proof is centered on one Gateway-to-Order request; no multi-flow service coverage matrix exists."
+      ]
+    },
+    {
+      "id": "E35",
+      "source": "otel_collector",
+      "destination": "loki",
+      "boundary": "OTLP log export",
+      "operations": [
+        "Export structured diagnostic logs for LogQL search"
+      ],
+      "failure_modes": [
+        "Loki unavailable",
+        "Collector exporter retry/drop",
+        "Structured metadata missing or unmapped"
+      ],
+      "evidence": [
+        "EV-PR41",
+        "EV-REPRO"
+      ],
+      "coverage": {
+        "automated": "documented",
+        "live": "reported_pass_open_pr",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "PR #41 verifies Gateway log searchability only.",
+        "No live per-service LogQL correlation check for Order, Inventory, Supplier, Dispatcher and Event Collector."
+      ]
+    },
+    {
+      "id": "E36",
+      "source": "gateway",
+      "destination": "otel_collector",
+      "boundary": "OTLP metrics push",
+      "operations": [
+        "gateway.requests counter",
+        "gateway.request.duration histogram"
+      ],
+      "failure_modes": [
+        "Collector unavailable",
+        "Metric export timeout/drop",
+        "Unbounded metric dimensions",
+        "Metric temporality/name mapping mismatch"
+      ],
+      "evidence": [
+        "EV-GW-UNIT",
+        "EV-PR42"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "reported_pass_open_pr",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "User-reported live counter increment validates the Gateway path.",
+        "No equivalent queryable metric export contract is defined for Order, Inventory, Supplier or Dispatcher."
+      ]
+    },
+    {
+      "id": "E37",
+      "source": "prometheus",
+      "destination": "otel_collector",
+      "boundary": "Prometheus scrape of Collector exporter",
+      "operations": [
+        "Scrape otel-collector:9464",
+        "Read normalized gateway counter and histogram series"
+      ],
+      "failure_modes": [
+        "Target down",
+        "Scrape timeout",
+        "Metric absent/stale",
+        "Resource attribute conversion mismatch"
+      ],
+      "evidence": [
+        "EV-PR42"
+      ],
+      "coverage": {
+        "automated": "partial",
+        "live": "reported_pass_open_pr",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "PR #42 reports Prometheus readiness, target up=1 and observed counter increment.",
+        "No scrape-failure alert or stale-series behavior verification."
+      ]
+    },
+    {
+      "id": "E38",
+      "source": "grafana",
+      "destination": "prometheus",
+      "boundary": "Metrics query/data source",
+      "operations": [
+        "Grafana Prometheus datasource provisioning",
+        "Dashboard/query execution"
+      ],
+      "failure_modes": [
+        "Datasource misconfiguration",
+        "Query returns empty/stale data",
+        "Dashboard variable/label mismatch"
+      ],
+      "evidence": [
+        "EV-PR42"
+      ],
+      "coverage": {
+        "automated": "documented",
+        "live": "none",
+        "assessment": "gap"
+      },
+      "gaps": [
+        "Datasource provisioning is included in an open PR.",
+        "No live Grafana API/dashboard query has been verified against the Prometheus data source."
+      ]
+    },
+    {
+      "id": "E39",
+      "source": "grafana",
+      "destination": "loki",
+      "boundary": "Log query/data source",
+      "operations": [
+        "Grafana Loki datasource provisioning",
+        "LogQL query execution"
+      ],
+      "failure_modes": [
+        "Datasource unavailable",
+        "Label/structured-metadata mismatch",
+        "Query returns no matching logs"
+      ],
+      "evidence": [
+        "EV-PR41",
+        "EV-REPRO"
+      ],
+      "coverage": {
+        "automated": "documented",
+        "live": "reported_pass_open_pr",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Loki query API evidence exists for Gateway logs.",
+        "No Grafana UI/API query proof or multi-service log dashboard verification."
+      ]
+    },
+    {
+      "id": "E40",
+      "source": "order_api",
+      "destination": "otel_collector",
+      "boundary": "OTLP log export",
+      "operations": [
+        "Order API structured diagnostic logs",
+        "Correlation ID and active trace/span identifiers on log records"
+      ],
+      "failure_modes": [
+        "OTLP exporter unavailable",
+        "Export queue/drop/timeout",
+        "Correlation/trace/span context missing from log record"
+      ],
+      "evidence": [
+        "EV-OBS",
+        "EV-PR41"
+      ],
+      "coverage": {
+        "automated": "partial",
+        "live": "none",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "The current live Loki verifier checks Gateway logs, not Order API logs.",
+        "No Order-specific LogQL query test verifies correlation and trace/span metadata."
+      ]
+    },
+    {
+      "id": "E41",
+      "source": "gateway",
+      "destination": "otel_collector",
+      "boundary": "OTLP trace export",
+      "operations": [
+        "Gateway server span",
+        "Gateway outbound HTTPX client span",
+        "W3C trace context propagation on upstream request"
+      ],
+      "failure_modes": [
+        "Incoming traceparent not continued",
+        "Wrong parent/child relationship",
+        "Collector unavailable/export failure"
+      ],
+      "evidence": [
+        "EV-PR39"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "reported_pass_open_pr",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "PR #39 reports a successful gateway-to-Order trace chain.",
+        "No equivalent live trace verification is recorded for Gateway-to-Supplier."
+      ]
+    },
+    {
+      "id": "E42",
+      "source": "gateway",
+      "destination": "otel_collector",
+      "boundary": "OTLP log export",
+      "operations": [
+        "Gateway structured diagnostic logs",
+        "Correlation ID and active trace/span identifiers on log records"
+      ],
+      "failure_modes": [
+        "OTLP exporter unavailable",
+        "Export queue/drop/timeout",
+        "Correlation/trace/span context missing from log record"
+      ],
+      "evidence": [
+        "EV-PR41"
+      ],
+      "coverage": {
+        "automated": "documented",
+        "live": "reported_pass_open_pr",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "The live Loki verifier proves one Gateway request log is searchable.",
+        "No test verifies log loss, queue saturation or Collector/Loki outage behavior."
+      ]
+    },
+    {
+      "id": "E43",
+      "source": "inventory_api",
+      "destination": "otel_collector",
+      "boundary": "OTLP log export",
+      "operations": [
+        "Inventory structured diagnostic logs",
+        "Correlation ID and active trace/span identifiers on log records"
+      ],
+      "failure_modes": [
+        "OTLP exporter unavailable",
+        "Export queue/drop/timeout",
+        "Correlation/trace/span context missing from log record"
+      ],
+      "evidence": [
+        "EV-OBS"
+      ],
+      "coverage": {
+        "automated": "partial",
+        "live": "none",
+        "assessment": "gap"
+      },
+      "gaps": [
+        "No Inventory-specific live Loki query by correlation ID and trace/span metadata."
+      ]
+    },
+    {
+      "id": "E44",
+      "source": "supplier_api",
+      "destination": "otel_collector",
+      "boundary": "OTLP log export",
+      "operations": [
+        "Supplier structured diagnostic logs",
+        "Correlation ID and active trace/span identifiers on log records"
+      ],
+      "failure_modes": [
+        "OTLP exporter unavailable",
+        "Export queue/drop/timeout",
+        "Correlation/trace/span context missing from log record"
+      ],
+      "evidence": [
+        "EV-OBS"
+      ],
+      "coverage": {
+        "automated": "partial",
+        "live": "none",
+        "assessment": "gap"
+      },
+      "gaps": [
+        "No Supplier-specific live Loki query by correlation ID and trace/span metadata."
+      ]
+    },
+    {
+      "id": "E45",
+      "source": "outbox_dispatcher",
+      "destination": "otel_collector",
+      "boundary": "OTLP log export",
+      "operations": [
+        "Dispatch attempt, retry and blocked-event logs",
+        "Event ID and correlation context in diagnostic records"
+      ],
+      "failure_modes": [
+        "OTLP exporter unavailable",
+        "Async context lost",
+        "Export queue/drop/timeout"
+      ],
+      "evidence": [
+        "EV-OBS"
+      ],
+      "coverage": {
+        "automated": "partial",
+        "live": "none",
+        "assessment": "gap"
+      },
+      "gaps": [
+        "No live outbox-dispatcher LogQL query for event ID/correlation ID or retry diagnostics."
+      ]
+    },
+    {
+      "id": "E46",
+      "source": "event_collector",
+      "destination": "otel_collector",
+      "boundary": "OTLP log export",
+      "operations": [
+        "Event ingestion, deduplication and quarantine logs",
+        "Correlation and trace/span context on request records"
+      ],
+      "failure_modes": [
+        "OTLP exporter unavailable",
+        "Self-generated HTTPX transport log recursion",
+        "Export queue/drop/timeout"
+      ],
+      "evidence": [
+        "EV-COLLECTOR",
+        "EV-OBS"
+      ],
+      "coverage": {
+        "automated": "partial",
+        "live": "none",
+        "assessment": "gap"
+      },
+      "gaps": [
+        "A test prevents Collector HTTPX transport logs from forwarding recursively.",
+        "No live Collector-to-Loki search verification."
+      ]
+    },
+    {
+      "id": "E47",
+      "source": "order_api",
+      "destination": "inventory_api",
+      "boundary": "HTTP dependency: reservation command",
+      "operations": [
+        "POST /inventory/{product_id}/reservations with stable saga_id and product_id identity"
+      ],
+      "failure_modes": [
+        "409 insufficient stock or inactive product",
+        "Inventory 5xx/connection error/timeout",
+        "Reservation commits but response is lost",
+        "Retry with same Saga identity",
+        "Retry with changed order/product/quantity"
+      ],
+      "evidence": [
+        "EV-ORDER-API",
+        "EV-ORDER-SAGA",
+        "EV-INVENTORY-PG"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "none",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Reservation rejection and idempotent replay are covered by tests.",
+        "No live Compose test injects a reservation endpoint failure after the Order Saga has started.",
+        "No live HTTP response-loss replay proves the Inventory movement is not duplicated."
+      ]
+    },
+    {
+      "id": "E48",
+      "source": "order_api",
+      "destination": "payment_adapter",
+      "boundary": "In-process compensation call",
+      "operations": [
+        "Refund a previously charged payment during Saga compensation"
+      ],
+      "failure_modes": [
+        "Refund adapter/database failure",
+        "Refund commits but compensation checkpoint is lost",
+        "Idempotent refund retry after Order API restart",
+        "Refund failure leaves execution reconciliation_required"
+      ],
+      "evidence": [
+        "EV-ORDER-API",
+        "EV-ORDER-SAGA"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "none",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Refund order, idempotency and restart recovery are covered by PostgreSQL integration tests.",
+        "No live Compose test forces refund failure after a successful payment charge."
+      ]
+    },
+    {
+      "id": "E49",
+      "source": "supplier_api",
+      "destination": "inventory_api",
+      "boundary": "HTTP dependency: product validation",
+      "operations": [
+        "GET /products/{product_id} before creating or updating a reorder policy"
+      ],
+      "failure_modes": [
+        "404 product not found",
+        "Inventory 5xx/connection error/timeout",
+        "Product deactivated between policy validation and later replenishment"
+      ],
+      "evidence": [
+        "EV-SUPPLIER-UNIT",
+        "EV-SUPPLIER-PG"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "none",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Product existence validation is tested.",
+        "No live Supplier-through-Gateway policy validation or Inventory outage test."
+      ]
+    },
+    {
+      "id": "E50",
+      "source": "analytics_runner",
+      "destination": "duckdb",
+      "boundary": "dbt materialization and analytical SQL",
+      "operations": [
+        "Read staged raw-event models",
+        "Materialize order, inventory, generator-reconciliation and Supplier facts",
+        "Run dbt schema and singular tests"
+      ],
+      "failure_modes": [
+        "dbt model compilation/runtime error",
+        "Schema drift or incompatible source payload",
+        "Singular reconciliation test failure",
+        "DuckDB lock or write error"
+      ],
+      "evidence": [
+        "EV-ANALYTICS",
+        "EV-REPRO"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "reproducible_script_only",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "The analytics project defines model and reconciliation contracts.",
+        "No recent full run report is attached demonstrating all facts after a degraded end-to-end scenario."
+      ]
+    },
+    {
+      "id": "E51",
+      "source": "duckdb",
+      "destination": "analytics_data_volume",
+      "boundary": "Durable analytics database file",
+      "operations": [
+        "Persist trace_events.duckdb under /analytics-data"
+      ],
+      "failure_modes": [
+        "Volume unavailable or read-only",
+        "Disk full",
+        "Database file corruption",
+        "Concurrent writers or stale lock"
+      ],
+      "evidence": [
+        "EV-ANALYTICS",
+        "EV-REPRO"
+      ],
+      "coverage": {
+        "automated": "partial",
+        "live": "reproducible_script_only",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Compose mounts a dedicated analytics-data volume.",
+        "No explicit volume-loss, disk-full or DuckDB restart/reopen test."
+      ]
+    },
+    {
+      "id": "E52",
+      "source": "external_client",
+      "destination": "event_collector",
+      "boundary": "Direct Event Collector HTTP API",
+      "operations": [
+        "POST /v1/events",
+        "GET /v1/events",
+        "GET /v1/quarantine",
+        "GET /v1/stats"
+      ],
+      "failure_modes": [
+        "Collector unavailable",
+        "Invalid schema or payload",
+        "Duplicate event ID",
+        "Conflicting payload quarantined",
+        "Host port or client connectivity failure"
+      ],
+      "evidence": [
+        "EV-COLLECTOR",
+        "EV-REPRO"
+      ],
+      "coverage": {
+        "automated": "present",
+        "live": "reproducible_script_only",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "Collector contract and persistence behavior are unit-tested.",
+        "No current live direct-host-port API report exercises every read/write route."
+      ]
+    },
+    {
+      "id": "E53",
+      "source": "analytics_runner",
+      "destination": "analytics_data_volume",
+      "boundary": "Analytics artifacts and report persistence",
+      "operations": [
+        "Persist dbt target artifacts",
+        "Write machine-readable analytics run report"
+      ],
+      "failure_modes": [
+        "Volume unavailable or read-only",
+        "Disk full",
+        "Atomic report write/rename failure",
+        "Partial analytics output after dbt failure"
+      ],
+      "evidence": [
+        "EV-ANALYTICS",
+        "EV-RUNNER",
+        "EV-REPRO"
+      ],
+      "coverage": {
+        "automated": "partial",
+        "live": "reproducible_script_only",
+        "assessment": "partial"
+      },
+      "gaps": [
+        "The runner writes its report and dbt artifacts to the dedicated analytics-data volume.",
+        "No explicit test covers volume write failure or report recovery after runner termination."
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "id": "F01",
+      "name": "Legacy read-only Order inventory lookup via Gateway",
+      "entry": "external_client",
+      "edge_path": [
+        "E01",
+        "E02",
+        "E09"
+      ],
+      "outcome": "Order returns the Inventory snapshot; the path ID is also treated as product ID.",
+      "evidence": [
+        "EV-GW-UNIT"
+      ],
+      "assessment": "gap"
+    },
+    {
+      "id": "F02",
+      "name": "Successful Order Saga",
+      "entry": "external_client",
+      "edge_path": [
+        "E01",
+        "E02",
+        "E08",
+        "E12",
+        "E47",
+        "E13",
+        "E11",
+        "E12"
+      ],
+      "outcome": "Inventory reserved, payment charged, order confirmed and durable checkpoints recorded.",
+      "evidence": [
+        "EV-ORDER-API",
+        "EV-ORDER-REPO",
+        "EV-ORDER-SAGA",
+        "EV-PR43"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F03",
+      "name": "Payment decline with Inventory compensation",
+      "entry": "external_client",
+      "edge_path": [
+        "E01",
+        "E02",
+        "E08",
+        "E12",
+        "E47",
+        "E13",
+        "E11",
+        "E10",
+        "E12"
+      ],
+      "outcome": "Payment is declined and the active Inventory reservation is released.",
+      "evidence": [
+        "EV-ORDER-API",
+        "EV-ORDER-SAGA",
+        "EV-REPRO"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F04",
+      "name": "Order confirmation failure after successful payment",
+      "entry": "external_client",
+      "edge_path": [
+        "E01",
+        "E02",
+        "E08",
+        "E12",
+        "E47",
+        "E13",
+        "E11",
+        "E12",
+        "E48",
+        "E10",
+        "E12"
+      ],
+      "outcome": "Refund payment, then release Inventory; failed compensation must remain visible for reconciliation.",
+      "evidence": [
+        "EV-ORDER-SAGA"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F05",
+      "name": "Inventory rejects reservation before payment",
+      "entry": "external_client",
+      "edge_path": [
+        "E01",
+        "E02",
+        "E08",
+        "E12",
+        "E47"
+      ],
+      "outcome": "No payment charge; Order exposes inventory rejection.",
+      "evidence": [
+        "EV-ORDER-API",
+        "EV-INVENTORY-UNIT"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F06",
+      "name": "Inventory dependency unavailable during Order Saga",
+      "entry": "external_client",
+      "edge_path": [
+        "E01",
+        "E02",
+        "E08",
+        "E47"
+      ],
+      "outcome": "Order reports dependency failure without false successful business state.",
+      "evidence": [
+        "EV-ORDER-API"
+      ],
+      "assessment": "gap"
+    },
+    {
+      "id": "F07",
+      "name": "Compensation fails and requires reconciliation",
+      "entry": "external_client",
+      "edge_path": [
+        "E01",
+        "E02",
+        "E08",
+        "E12",
+        "E47",
+        "E13",
+        "E11",
+        "E12",
+        "E48",
+        "E10",
+        "E12"
+      ],
+      "outcome": "Persist reconciliation_required; do not report a successful rollback.",
+      "evidence": [
+        "EV-ORDER-API",
+        "EV-ORDER-SAGA"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F08",
+      "name": "Order Saga restart and idempotent recovery",
+      "entry": "order_api",
+      "edge_path": [
+        "E12",
+        "E47",
+        "E13",
+        "E11",
+        "E48",
+        "E10",
+        "E12"
+      ],
+      "outcome": "Resume incomplete forward/compensation steps with stable identities after restart.",
+      "evidence": [
+        "EV-ORDER-SAGA"
+      ],
+      "assessment": "covered"
+    },
+    {
+      "id": "F09",
+      "name": "Direct API access bypassing Gateway",
+      "entry": "external_client",
+      "edge_path": [
+        "E05",
+        "E06",
+        "E07"
+      ],
+      "outcome": "Direct service endpoints preserve the service contracts and correlation behavior.",
+      "evidence": [
+        "EV-ORDER-API",
+        "EV-INVENTORY-PG",
+        "EV-SUPPLIER-UNIT"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F10",
+      "name": "Supplier product onboarding",
+      "entry": "external_client",
+      "edge_path": [
+        "E01",
+        "E04",
+        "E14",
+        "E17",
+        "E13"
+      ],
+      "outcome": "Supplier fixture produces Inventory catalog product and reorder policy.",
+      "evidence": [
+        "EV-SUPPLIER-UNIT",
+        "EV-SUPPLIER-PG"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F11",
+      "name": "Supplier replenishment evaluation",
+      "entry": "external_client",
+      "edge_path": [
+        "E01",
+        "E04",
+        "E15",
+        "E17"
+      ],
+      "outcome": "Inventory position is evaluated and a purchase order is created or suppressed.",
+      "evidence": [
+        "EV-SUPPLIER-UNIT"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F12",
+      "name": "Supplier purchase-order receipt with uncertain acknowledgement",
+      "entry": "external_client",
+      "edge_path": [
+        "E01",
+        "E04",
+        "E16",
+        "E17",
+        "E13"
+      ],
+      "outcome": "Supplier moves ordered to receiving, Inventory applies receipt idempotently, Supplier completes received state.",
+      "evidence": [
+        "EV-SUPPLIER-UNIT",
+        "EV-SUPPLIER-PG",
+        "EV-INVENTORY-PG"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F13",
+      "name": "Order generator batch",
+      "entry": "order_generator",
+      "edge_path": [
+        "E22",
+        "E02",
+        "E08",
+        "E12",
+        "E47",
+        "E13",
+        "E11",
+        "E12",
+        "E23"
+      ],
+      "outcome": "Deterministic plan produces per-attempt outcomes and publishes run/attempt events.",
+      "evidence": [
+        "EV-GENERATOR",
+        "EV-REPRO"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F14",
+      "name": "Standalone simulation across Order, Inventory and Supplier",
+      "entry": "simulation_runner",
+      "edge_path": [
+        "E24",
+        "E02",
+        "E08",
+        "E12",
+        "E47",
+        "E13",
+        "E11",
+        "E12",
+        "E03",
+        "E04",
+        "E14",
+        "E49",
+        "E15",
+        "E16",
+        "E17",
+        "E25",
+        "E26",
+        "E27"
+      ],
+      "outcome": "A complete scenario produces a report and waits for expected Collector events.",
+      "evidence": [
+        "EV-RUNNER",
+        "EV-REPRO"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F15",
+      "name": "Transactional business-event creation and dispatch",
+      "entry": "postgres",
+      "edge_path": [
+        "E18",
+        "E19",
+        "E20",
+        "E21"
+      ],
+      "outcome": "Committed domain events are leased, delivered at least once and durably appended; rollback produces no event.",
+      "evidence": [
+        "EV-OUTBOX",
+        "EV-COLLECTOR"
+      ],
+      "assessment": "covered"
+    },
+    {
+      "id": "F16",
+      "name": "Best-effort workload/rejected-reservation event publishing",
+      "entry": "order_generator",
+      "edge_path": [
+        "E23",
+        "E21"
+      ],
+      "outcome": "Non-transactional attempt events are sent directly to the Event Collector; loss remains possible.",
+      "evidence": [
+        "EV-GENERATOR",
+        "EV-COLLECTOR"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F17",
+      "name": "Raw business events to analytical facts",
+      "entry": "event_volume",
+      "edge_path": [
+        "E28",
+        "E50",
+        "E51",
+        "E53"
+      ],
+      "outcome": "dbt transforms JSONL events into order, inventory, generator and supplier facts and reconciliation.",
+      "evidence": [
+        "EV-ANALYTICS",
+        "EV-REPRO"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F18",
+      "name": "Order trace propagation to Jaeger",
+      "entry": "external_client",
+      "edge_path": [
+        "E01",
+        "E02",
+        "E41",
+        "E29",
+        "E30",
+        "E34"
+      ],
+      "outcome": "One trace contains caller/gateway/Order and downstream Inventory spans with parent-child continuity.",
+      "evidence": [
+        "EV-PR39"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F19",
+      "name": "Structured diagnostic logs searchable in Loki",
+      "entry": "external_client",
+      "edge_path": [
+        "E01",
+        "E02",
+        "E42",
+        "E35"
+      ],
+      "outcome": "Gateway log is searchable by generated correlation ID and trace/span metadata.",
+      "evidence": [
+        "EV-PR41"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F20",
+      "name": "Gateway metrics to Prometheus and Grafana",
+      "entry": "gateway",
+      "edge_path": [
+        "E36",
+        "E37",
+        "E38"
+      ],
+      "outcome": "Gateway request counter/histogram is exported, scraped and queryable through Grafana.",
+      "evidence": [
+        "EV-PR42"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F21",
+      "name": "Deterministic Gateway degradation and recovery",
+      "entry": "external_client",
+      "edge_path": [
+        "E01",
+        "E03"
+      ],
+      "outcome": "Baseline, rate limiting, injected 503, timeout 504 and successful policy recovery.",
+      "evidence": [
+        "EV-GW-UNIT",
+        "EV-PR40"
+      ],
+      "assessment": "covered"
+    },
+    {
+      "id": "F22",
+      "name": "Supplier request trace and log propagation",
+      "entry": "external_client",
+      "edge_path": [
+        "E01",
+        "E04",
+        "E14",
+        "E31",
+        "E44",
+        "E34",
+        "E35"
+      ],
+      "outcome": "Supplier request and its direct Inventory dependency are represented in Jaeger and have searchable structured logs in Loki.",
+      "evidence": [
+        "EV-OBS"
+      ],
+      "assessment": "gap"
+    },
+    {
+      "id": "F23",
+      "name": "Asynchronous outbox and Event Collector diagnostics",
+      "entry": "postgres",
+      "edge_path": [
+        "E18",
+        "E19",
+        "E20",
+        "E32",
+        "E33",
+        "E45",
+        "E46",
+        "E34",
+        "E35"
+      ],
+      "outcome": "Dispatch attempts, retries, ingestion and quarantine diagnostics can be correlated to the triggering business event.",
+      "evidence": [
+        "EV-OUTBOX",
+        "EV-COLLECTOR",
+        "EV-OBS"
+      ],
+      "assessment": "gap"
+    },
+    {
+      "id": "F24",
+      "name": "Supplier reorder-policy product validation",
+      "entry": "external_client",
+      "edge_path": [
+        "E01",
+        "E04",
+        "E49",
+        "E17"
+      ],
+      "outcome": "Supplier verifies that the Inventory-owned product exists before persisting a reorder policy.",
+      "evidence": [
+        "EV-SUPPLIER-UNIT",
+        "EV-SUPPLIER-PG"
+      ],
+      "assessment": "partial"
+    },
+    {
+      "id": "F25",
+      "name": "Direct Event Collector operational API",
+      "entry": "external_client",
+      "edge_path": [
+        "E52",
+        "E21"
+      ],
+      "outcome": "An operator or external producer submits events and inspects accepted/quarantined records and Collector statistics.",
+      "evidence": [
+        "EV-COLLECTOR",
+        "EV-REPRO"
+      ],
+      "assessment": "partial"
+    }
+  ],
+  "prioritized_gaps": [
+    {
+      "priority": "P0",
+      "id": "GAP-01",
+      "title": "Live Order-to-Inventory dependency failure and Saga behavior",
+      "affected_edges": [
+        "E08",
+        "E10",
+        "E12",
+        "E13",
+        "E47",
+        "E48"
+      ],
+      "required_scenarios": [
+        "Inventory unavailable during catalog preflight",
+        "Inventory reservation returns 5xx/timeout",
+        "Reservation commits but HTTP response is lost, then retry",
+        "Payment decline followed by live Inventory release",
+        "Order confirmation failure after payment, refund then release",
+        "Refund or release fails and execution becomes reconciliation_required",
+        "Restart Order and prove recovery without duplicate payment/movement"
+      ]
+    },
+    {
+      "priority": "P1",
+      "id": "GAP-02",
+      "title": "Live Gateway-to-Supplier route and lifecycle",
+      "affected_edges": [
+        "E04",
+        "E14",
+        "E15",
+        "E16",
+        "E17",
+        "E49"
+      ],
+      "required_scenarios": [
+        "Onboard through Gateway",
+        "Evaluate replenishment through Gateway",
+        "Order/advance clock/receive PO through Gateway",
+        "Supplier-to-Inventory failure and retry",
+        "Verify PO transitions and Inventory movement reconciliation"
+      ]
+    },
+    {
+      "priority": "P1",
+      "id": "GAP-03",
+      "title": "Live Outbox-to-Collector outage and recovery",
+      "affected_edges": [
+        "E18",
+        "E19",
+        "E20",
+        "E21"
+      ],
+      "required_scenarios": [
+        "Stop Collector while committed events accumulate",
+        "Observe retries/lease behavior and oldest pending age",
+        "Restore Collector and prove same event IDs are delivered",
+        "Verify no missing/duplicate analytical facts after dbt"
+      ]
+    },
+    {
+      "priority": "P1",
+      "id": "GAP-04",
+      "title": "Full service telemetry coverage",
+      "affected_edges": [
+        "E29",
+        "E30",
+        "E31",
+        "E32",
+        "E33",
+        "E34",
+        "E35",
+        "E40",
+        "E41",
+        "E42",
+        "E43",
+        "E44",
+        "E45",
+        "E46"
+      ],
+      "required_scenarios": [
+        "Trace parent-child continuity across Order→Inventory and Supplier→Inventory",
+        "Loki search by correlation ID for each service",
+        "Prove async Dispatcher trace/log correlation",
+        "Prove Event Collector ingest logs searchable without recursive forwarding"
+      ]
+    },
+    {
+      "priority": "P1",
+      "id": "GAP-05",
+      "title": "Prometheus/Grafana query verification",
+      "affected_edges": [
+        "E36",
+        "E37",
+        "E38"
+      ],
+      "required_scenarios": [
+        "Query metric through Prometheus HTTP API after a fresh scrape",
+        "Query same series through Grafana datasource/API",
+        "Verify exporter unavailable/stale-target behavior",
+        "Verify metric cardinality remains bounded"
+      ]
+    },
+    {
+      "priority": "P2",
+      "id": "GAP-06",
+      "title": "Direct API versus Gateway contract parity",
+      "affected_edges": [
+        "E05",
+        "E06",
+        "E07"
+      ],
+      "required_scenarios": [
+        "Run equivalent API cases through direct service ports and Gateway",
+        "Compare status/body/correlation headers",
+        "Verify direct access is intentionally supported and documented"
+      ]
+    },
+    {
+      "priority": "P2",
+      "id": "GAP-07",
+      "title": "Legacy Order inventory lookup test",
+      "affected_edges": [
+        "E09"
+      ],
+      "required_scenarios": [
+        "GET /orders/{order_id} returns Inventory snapshot",
+        "Inventory 404/5xx/timeout maps to documented Order response",
+        "Trace and correlation context survive the direct Order→Inventory hop"
+      ]
+    },
+    {
+      "priority": "P2",
+      "id": "GAP-08",
+      "title": "Analytics completeness under degraded event delivery",
+      "affected_edges": [
+        "E23",
+        "E25",
+        "E27",
+        "E28",
+        "E50",
+        "E51",
+        "E52",
+        "E53"
+      ],
+      "required_scenarios": [
+        "Generator attempts reconcile to service outcomes",
+        "Collector barrier waits for dispatch completion",
+        "Quarantined/unsupported records are excluded and visible",
+        "dbt reconciliation fails on missing or mismatched facts"
+      ]
+    }
+  ],
+  "review_pr_evidence": [
+    {
+      "id": 39,
+      "title": "Test gateway trace context continuity",
+      "state": "merged",
+      "validation": "User-reported 18 targeted tests and live Jaeger verification passed."
+    },
+    {
+      "id": 40,
+      "title": "Verify deterministic gateway scenarios against Compose",
+      "state": "merged",
+      "validation": "User-reported baseline/429/503/504/recovery live scenarios passed."
+    },
+    {
+      "id": 41,
+      "title": "Verify gateway diagnostic logs are searchable in Loki",
+      "state": "merged",
+      "validation": "User-reported live Loki query returned a matching gateway request log."
+    },
+    {
+      "id": 42,
+      "title": "Add queryable Prometheus metrics for the gateway",
+      "state": "merged",
+      "validation": "User-reported Prometheus target up=1 and fresh counter increment; Grafana query not verified."
+    },
+    {
+      "id": 43,
+      "title": "Verify gateway ingress degradation against the Order Saga",
+      "state": "merged",
+      "validation": "User-reported Ruff, five verifier tests and live baseline/replay/ingress-failure validation passed; no downstream Inventory outage tested."
+    }
+  ],
+  "validation_policy": [
+    "Never mark an edge covered solely because its source/destination appears in a successful happy-path flow.",
+    "For HTTP edges, separately record success, domain rejection, dependency 5xx, timeout/connection failure, context propagation and response-loss retry where the operation is idempotent.",
+    "For persistence edges, separately record transaction rollback, restart/recovery, concurrency and idempotency.",
+    "For async delivery edges, separately record retry, duplicate delivery, acknowledgement loss, lease expiry, quarantine and terminal blocking.",
+    "For telemetry edges, prove data is queryable at the destination; exporter configuration alone is not sufficient.",
+    "For each live experiment, record exact command, Compose project/stack identity, correlation/request IDs, observed status, durable side effects and restoration steps."
+  ]
+}
