@@ -301,6 +301,15 @@ suitable for an untrusted network. See
 [the Gateway Simulator guide](docs/api-gateway-simulator.md) for policy fields,
 examples, and current limitations.
 
+Run the end-to-end ingress comparison against the live PostgreSQL-backed Order
+Saga (one successful demo order/reservation; the degraded request is rejected
+before Saga execution, and the original gateway policy is restored):
+
+```bash
+uv run python scripts/verify-gateway-order-workflow.py
+```
+
+
 ## Live Gateway scenario verification
 
 With the Compose stack running and the gateway exposed on port 18004, run:

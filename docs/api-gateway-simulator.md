@@ -83,6 +83,57 @@ The API replaces the complete route set, increments the revision, and records a
 bounded process-local audit entry. Each admitted request keeps the immutable
 policy snapshot it observed at admission. Policy and audit state reset on restart.
 
+## End-to-end Order Saga ingress experiment
+
+The Order Saga verifier compares the existing business workflow under a normal
+gateway ingress policy with a deterministic HTTP 503 injected on the gateway's
+`order-api` route:
+
+```bash
+uv run python scripts/verify-gateway-order-workflow.py
+```
+
+The Compose stack must be running with the PostgreSQL migrations applied, and
+the selected product must be active with enough available stock. The default
+uses demo product 7 and reserves one unit.
+
+The verifier performs these checks:
+
+1. Install a baseline `order-api` route policy with no injected fault, added
+   latency, rate limit, or in-flight limit; submit an order through the gateway.
+2. Inspect the Order API recovery view and require the unchanged action sequence
+   `reserve_inventory -> charge_payment -> confirm_order` to be completed.
+   It checks the demo payment ID against the existing deterministic
+   `UUIDv5("payment:<saga_id>")` identity.
+3. Replay the same order and require the Saga, payment, and reservation
+   identities to remain unchanged, with each forward step still attempted once.
+4. Set the `order-api` route's failure probability to 1.0 and submit a different
+   order ID. The gateway must return `503 injected_http_failure`; the direct
+   Order API recovery lookup must return 404, proving the request never created
+   an Order Saga or reached the payment/reservation actions.
+5. Restore the original policy seed and complete route set with compare-and-swap,
+   then verify that the exact original seed and route configuration is active
+   again. The policy revision advances; it is not reset to its old number.
+
+The verifier restores the policy in a `finally` block. If another actor changes
+the policy while the verifier is running, it refuses to overwrite that newer
+revision; inspect and restore the intended policy manually.
+
+**Scope of this experiment:** the gateway intentionally remains an ingress
+boundary. Order-to-Inventory calls remain direct as documented above. The
+degraded scenario therefore demonstrates an ingress rejection before Saga
+execution, not a simulated failure inside the Inventory dependency or a Saga
+compensation path. Those are separate experiments and should not be conflated.
+
+**Persistent side effect:** the baseline creates one real demo order, one
+durable demo payment, and one Inventory reservation in the Compose PostgreSQL
+database. Replaying it does not create another reservation/payment. The
+degraded request creates no Order/Saga/payment/reservation state. The current
+Order Saga does not commit stock, so the successful reservation remains
+reserved; use a product with sufficient available quantity and account for the
+requested quantity (one unit by default) when repeating the verifier. The script does not restart
+containers, clear volumes, or mutate the gateway policy permanently.
+
 ## Current behavior and limits
 
 - Route selection uses the longest matching path prefix with path-boundary checks.
