@@ -729,9 +729,10 @@ with PostgreSQL advisory locks, and exposes incomplete work at
 [the Order Saga recovery contract](docs/order-saga-recovery.md).
 
 This MVP uses the OpenTelemetry Collector to export diagnostic traces to Jaeger,
-logs to Loki, and gateway metrics to the Collector's debug exporter. Grafana
-provisions Loki and Jaeger for local exploration; the gateway metrics are
-exported but are not yet backed by a queryable metrics store. The Event Collector
+logs to Loki, and metrics through its Prometheus exporter to a local Prometheus
+server. Grafana provisions Loki, Prometheus, and Jaeger for local exploration.
+Prometheus retains seven days of metrics in its named volume; this is a local
+development setup, not a production monitoring platform. The Event Collector
 remains the append-only business-event path used by dbt, separate from Loki.
 The system is not a production observability platform and still lacks
 authentication and production deployment hardening. The Event Collector is
